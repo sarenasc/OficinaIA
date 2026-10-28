@@ -42,7 +42,11 @@ def main():
         sys.path.insert(0, str(root / 'backend'))
     # Reserve-check before initializing the database or starting background jobs.
     with socket.socket() as probe:
-        probe.bind(('127.0.0.1', 38080))
+        try:
+            probe.bind(('127.0.0.1', 38080))
+        except OSError:
+            print('ERROR: no se pudo reservar 127.0.0.1:38080. Compruebe si ya hay otra instancia abierta.', flush=True)
+            raise
     import uvicorn
     from fastapi.staticfiles import StaticFiles
     from app.main import app

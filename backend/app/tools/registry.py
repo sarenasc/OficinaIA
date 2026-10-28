@@ -220,6 +220,7 @@ def execute_tool(session: Session, task: Task, agent: Agent, name: str, args: di
     session.add(execution)
     session.commit()
     start = time.monotonic()
+    audit(session, 'tool.started', {'name': name}, task.id, agent.id)
     error_category = None
     try:
         if tool.kind == "excel.create" and "format" in args:

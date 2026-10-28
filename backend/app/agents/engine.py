@@ -385,6 +385,10 @@ async def run_agents(session: Session, task: Task):
             frames.append(
                 {"agent_id": child_id, "request": action["request"], "messages": [], "pending": None, "steps": 0}
             )
+            save_context(session, task, context)
+            child = session.get(Agent, child_id)
+            audit(session, 'agent.delegated', {'target_id': child_id,
+                  'target_name': child.name if child else child_id}, task.id, agent.id)
         else:
             context["total_steps"] = context.get("total_steps", 0) + 1
             if direct_tool_request(frame["request"]) and not frame.get("direct_verified"):

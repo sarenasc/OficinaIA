@@ -22,3 +22,9 @@ def redact(value):
 def audit(session: Session, action: str, details: dict, task_id: str | None = None, agent_id: str | None = None):
     session.add(AuditEvent(action=action, details=redact(details), task_id=task_id, agent_id=agent_id))
     session.commit()
+    # A console/file problem must never change whether an audited action succeeds.
+    try:
+        from app.core.runtime_log import emit
+        emit(session, action, details, task_id, agent_id)
+    except Exception:
+        pass
