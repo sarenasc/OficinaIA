@@ -5,16 +5,19 @@ import type { Row } from '../api';
 import { createOfficeWorld } from './officeWorld';
 import { canRoam, restDestination } from './officeAmbient';
 import { routePosition, walkingRoute, type Point } from './officePaths';
+import { structureHeight, type Structure } from './floorplan';
 
 export default function Office3D({
   agents,
   positions,
+  structure,
   connected,
   onSelect,
   onFallback,
 }: {
   agents: Row[];
   positions: Point[];
+  structure: Structure;
   connected: boolean;
   onSelect: (id: string) => void;
   onFallback: () => void;
@@ -23,8 +26,9 @@ export default function Office3D({
   const latest = useRef({ agents, connected });
   latest.current = { agents, connected };
   const [error, setError] = useState('');
-  const height = Math.max(900, ...positions.map((p) => p.y + 500));
+  const height = Math.max(structureHeight(structure), ...positions.map((p) => p.y + 500));
   const layout = JSON.stringify(positions);
+  const building = JSON.stringify(structure);
   const identity = agents.map((a) => `${a.id}:${a.name}`).join('|');
   useEffect(() => {
     if (!host.current) return;
@@ -52,6 +56,7 @@ export default function Office3D({
       latest.current.agents.map((agent) => ({ id: agent.id, name: agent.name })),
       JSON.parse(layout),
       height,
+      JSON.parse(building),
     );
     scene.add(world.world);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x748779, 2));
@@ -138,7 +143,13 @@ export default function Office3D({
             person.location = anchor;
             person.nextAt = elapsed + 1500;
           } else if (status === 'working' && latest.current.connected && !motion.matches) {
-            const route = walkingRoute(person.location, anchor, world.obstacles, height);
+            const route = walkingRoute(
+              person.location,
+              anchor,
+              world.obstacles,
+              height,
+              world.walls,
+            );
             person.route = route.length ? [...route, seat] : [];
             if (!route.length) person.location = seat;
           } else person.location = seat;
@@ -151,7 +162,13 @@ export default function Office3D({
               ? anchor
               : restDestination(world.people.indexOf(person), person.phase, height);
           person.phase++;
-          person.route = walkingRoute(person.location, target, world.obstacles, height);
+          person.route = walkingRoute(
+            person.location,
+            target,
+            world.obstacles,
+            height,
+            world.walls,
+          );
           person.distance = 0;
           person.nextAt = elapsed + 8000;
         }
@@ -227,7 +244,7 @@ export default function Office3D({
       renderer.forceContextLoss();
       renderer.domElement.remove();
     };
-  }, [identity, layout, height, onSelect]);
+  }, [identity, layout, building, height, onSelect]);
   return (
     <div className="office-3d">
       <p className="scene-instructions">

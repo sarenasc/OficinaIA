@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { routePosition, walkingRoute, type Point } from './officePaths';
+import type { Wall } from './floorplan';
 
 export function OfficeWalker({
   eventId,
   destination,
   home,
   obstacles,
+  walls,
   height,
   paused,
   children,
@@ -14,6 +16,7 @@ export function OfficeWalker({
   destination?: Point;
   home: Point;
   obstacles: Point[];
+  walls: Wall[];
   height: number;
   paused: boolean;
   children: ReactNode;
@@ -24,18 +27,18 @@ export function OfficeWalker({
   const pause = useRef(paused);
   pause.current = paused;
   // Coordinates are captured per event; REST/heartbeat rerenders never restart a walk.
-  const current = useRef({ destination, home, obstacles, height });
-  current.current = { destination, home, obstacles, height };
+  const current = useRef({ destination, home, obstacles, height, walls });
+  current.current = { destination, home, obstacles, height, walls };
   useEffect(() => {
     if (!eventId || seen.current === eventId) return;
     seen.current = eventId;
-    const { destination, home, obstacles, height } = current.current;
+    const { destination, home, obstacles, height, walls } = current.current;
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (!destination || motion.matches) return;
     const seat = { x: home.x, y: home.y + 65 };
     const start = { x: home.x, y: home.y + 130 },
       end = { x: Math.min(1110, destination.x + 65), y: destination.y + 130 };
-    const outward = walkingRoute(start, end, obstacles, height);
+    const outward = walkingRoute(start, end, obstacles, height, walls);
     if (!outward.length) return;
     const visit = [seat, ...outward];
     const route = [...visit, ...visit.slice(0, -1).reverse()];

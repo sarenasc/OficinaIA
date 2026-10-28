@@ -93,6 +93,39 @@ def test_scene_rejects_foreign_agents_and_bad_coordinates(client):
     assert client.get(f"/api/offices/{office['id']}/scene", headers={"Authorization": ""}).status_code == 401
 
 
+def test_building_persists_duplicates_and_survives_legacy_desk_edit(client):
+    office = create(client, 'offices', name='Edificio')
+    url = f"/api/offices/{office['id']}"
+    room = {'id': 'meeting', 'name': 'Reuniones', 'x': 80, 'y': 140, 'width': 400, 'depth': 300, 'door': 'bottom'}
+    partition = {'id': 'divider', 'x': 600, 'y': 140, 'length': 400, 'orientation': 'vertical', 'doorway': True}
+    payload = {'revision': 0, 'desks': {}, 'rooms': [room], 'partitions': [partition]}
+    assert client.put(url + '/layout', json=payload).status_code == 200
+    layout = client.get(url + '/scene').json()['layout']
+    assert layout['rooms'] == [room]
+    assert layout['partitions'] == [partition]
+    assert client.put(url + '/layout', json=payload).status_code == 409
+    # Older clients editing only desks must preserve the physical structure.
+    assert client.put(url + '/layout', json={'revision': 1, 'desks': {}}).status_code == 200
+    clone = client.post(url + '/duplicate').json()
+    copied = client.get(f"/api/offices/{clone['id']}/scene").json()['layout']
+    assert copied['rooms'] == [room] and copied['partitions'] == [partition]
+    assert client.put(url + '/layout', json={'revision': 2, 'desks': {}, 'rooms': [], 'partitions': []}).status_code == 200
+    assert client.get(url + '/scene').json()['layout']['rooms'] == []
+
+
+@pytest.mark.parametrize('change', [
+    {'x': 1000}, {'width': -20}, {'depth': 5000}, {'door': 'invalid'}, {'name': ''},
+])
+def test_building_rejects_invalid_rooms(client, change):
+    office = create(client, 'offices', name='Validación')
+    room = {'id': 'r', 'name': 'Sala', 'x': 80, 'y': 140, 'width': 400, 'depth': 300, **change}
+    import json
+    response = client.put(f"/api/offices/{office['id']}/layout",
+                          content=json.dumps({'revision': 0, 'desks': {}, 'rooms': [room]}),
+                          headers={'Content-Type': 'application/json'})
+    assert response.status_code == 422
+
+
 def test_scene_activity_exposes_operation_error_and_newer_task(client, tmp_path):
     from datetime import datetime, timedelta, timezone
 

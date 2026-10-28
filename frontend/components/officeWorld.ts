@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Point } from './officePaths';
+import { EMPTY_STRUCTURE, wallsOf, type Structure } from './floorplan';
 
 export type Person = {
   id: string;
@@ -24,8 +25,10 @@ export function createOfficeWorld(
   agents: { id: string; name: string }[],
   positions: Point[],
   height: number,
+  structure: Structure = EMPTY_STRUCTURE,
 ) {
   const world = new THREE.Group();
+  const walls = wallsOf(structure);
   const people: Person[] = [];
   const x = (value: number) => value / 60 - 10,
     z = (value: number) => value / 60 - height / 120;
@@ -97,6 +100,34 @@ export function createOfficeWorld(
     return sprite;
   }
   box(world, 20, 0.18, height / 60, 0, -0.09, 0, 0xd6c7ae);
+  for (const room of structure.rooms) {
+    box(
+      world,
+      room.width / 60,
+      0.025,
+      room.depth / 60,
+      x(room.x + room.width / 2),
+      0.04,
+      z(room.y + room.depth / 2),
+      0xc4dcdb,
+    );
+    const sign = label(room.name, Math.min(4, room.width / 70));
+    sign.position.set(x(room.x + room.width / 2), 2.65, z(room.y + 30));
+    world.add(sign);
+  }
+  for (const wall of walls) {
+    const horizontal = wall.a.y === wall.b.y;
+    box(
+      world,
+      horizontal ? Math.abs(wall.b.x - wall.a.x) / 60 : 0.14,
+      2.3,
+      horizontal ? 0.14 : Math.abs(wall.b.y - wall.a.y) / 60,
+      x((wall.a.x + wall.b.x) / 2),
+      1.15,
+      z((wall.a.y + wall.b.y) / 2),
+      0x94b0b3,
+    );
+  }
   for (let i = 0; i < 20; i++) box(world, 0.012, 0.01, height / 60, -10 + i, 0.015, 0, 0xc1b299);
   box(world, 20, 0.02, 5, 0, 0.02, z(height - 170), 0xaebdb3);
   box(world, 20, 3.5, 0.18, 0, 1.75, -height / 120, 0xf0eee7);
@@ -258,5 +289,5 @@ export function createOfficeWorld(
       }
     });
   }
-  return { world, people, obstacles, x, z, dispose };
+  return { world, people, obstacles, walls, x, z, dispose };
 }

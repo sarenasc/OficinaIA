@@ -8,6 +8,8 @@ import { useOfficeStream } from './useOfficeStream';
 import { OfficeWalker } from './OfficeWalker';
 import { clampPosition, defaultPosition, type Point } from './officePaths';
 import { useOllamaStatus } from './useOllamaStatus';
+import { FloorplanEditor, FloorplanLayer } from './FloorplanEditor';
+import { EMPTY_STRUCTURE, structureHeight, wallsOf, type Structure } from './floorplan';
 const Office3D = lazy(() => import('./Office3D'));
 export function OfficeScene({
   officeId,
@@ -28,13 +30,21 @@ export function OfficeScene({
   const [editing, setEditing] = useState(false);
   const [editRevision, setEditRevision] = useState(0);
   const [desks, setDesks] = useState<Record<string, Point>>({});
+  const [structure, setStructure] = useState<Structure>(EMPTY_STRUCTURE);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const agents: Row[] = scene?.agents || [];
   function position(agent: Row, index: number): Point {
     return (editing ? desks[agent.id] : scene?.layout?.desks?.[agent.id]) || defaultPosition(index);
   }
-  const height = Math.max(650, ...agents.map((a, i) => position(a, i).y + 170));
+  const building: Structure = editing
+    ? structure
+    : { rooms: scene?.layout?.rooms || [], partitions: scene?.layout?.partitions || [] };
+  const walls = wallsOf(building);
+  const height = Math.max(
+    structureHeight(building),
+    ...agents.map((a, i) => position(a, i).y + 500),
+  );
   const obstacles = agents.map(position);
   function pointer(e: PointerEvent<SVGGElement>): Point | null {
     const matrix = svg.current?.getScreenCTM();
@@ -50,6 +60,7 @@ export function OfficeScene({
       const layout = await api(`offices/${officeId}/layout`, 'PUT', {
         revision: editRevision,
         desks,
+        ...structure,
       });
       setScene((current) => (current ? { ...current, layout } : current));
       setEditing(false);
@@ -118,17 +129,21 @@ export function OfficeScene({
               setView('2d');
               setDesks(Object.fromEntries(agents.map((a, i) => [a.id, position(a, i)])));
               setEditRevision(scene.layout.revision || 0);
+              setStructure({
+                rooms: scene.layout.rooms || [],
+                partitions: scene.layout.partitions || [],
+              });
               setEditing(true);
             }}
           >
-            Editar distribución
+            Construir oficina
           </button>
         )}
       </div>
       {editing && (
         <p className="scene-instructions">
-          Arrastra un escritorio o usa las flechas cuando tenga el foco. Guarda para conservar los
-          cambios.
+          Añade salas y divisiones. Arrastra las salas, paredes y escritorios o usa las flechas al
+          seleccionarlos. Guarda para conservar el diseño.
         </p>
       )}
       <p className="scene-instructions">
@@ -137,12 +152,14 @@ export function OfficeScene({
           : 'Estados reales del motor. Los paseos a cafetería y descanso son ambientación y no ejecutan tareas.'}
       </p>
       {error && <p role="alert">{error}</p>}
+      {editing && <FloorplanEditor value={structure} onChange={setStructure} disabled={saving} />}
       <div className="scene-body">
         {view === '3d' ? (
           <Suspense fallback={<p>Cargando oficina 3D…</p>}>
             <Office3D
               agents={agents}
               positions={obstacles}
+              structure={building}
               connected={connected}
               onSelect={setSelected}
               onFallback={() => setView('2d')}
@@ -183,6 +200,12 @@ export function OfficeScene({
                   <circle cx="-15" cy="-30" r="15" fill="#84b384" />
                 </g>
               ))}
+              <FloorplanLayer
+                value={building}
+                onChange={setStructure}
+                disabled={saving}
+                editing={editing}
+              />
               {agents.map((agent, i) => {
                 const p = position(agent, i);
                 const state =
@@ -299,6 +322,7 @@ export function OfficeScene({
                       home={p}
                       height={height}
                       obstacles={obstacles}
+                      walls={walls}
                       paused={!connected || editing}
                       eventId={
                         scene.messages?.find((message: Row) => message.source_id === agent.id)?.id
@@ -364,62 +388,81 @@ export function OfficeScene({
             </svg>
           </div>
         )}
-        {editing && person && (<aside className="scene-panel">
-          {person ? (
-            <>
-              <h3>{person.name}</h3>
-              <p>{person.role || 'Agente'}</p>
-              <Status value={person.status} />
-              <AgentActivity agent={person} onTask={onTask} />
-              {editing && (
-                <fieldset>
-                  <legend>Posición del escritorio</legend>
-                  {(['x', 'y'] as const).map((axis) => (
-                    <label key={axis}>
-                      {axis.toUpperCase()}
-                      <input
-                        type="number"
-                        min={axis === 'x' ? 100 : 130}
-                        max={axis === 'x' ? 1100 : 3800}
-                        step="10"
-                        value={desks[person.id]?.[axis] || 0}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          setDesks((current) => ({
-                            ...current,
-                            [person.id]: {
-                              ...current[person.id],
-                              [axis]: Math.max(
-                                axis === 'x' ? 100 : 130,
-                                Math.min(axis === 'x' ? 1100 : 3800, value),
-                              ),
-                            },
-                          }));
-                        }}
-                      />
-                    </label>
-                  ))}
-                </fieldset>
-              )}
-            </>
-          ) : (
-            <>
-              <h3>Tu equipo</h3>
-              <p>Selecciona una persona para ver su actividad y abrir la tarea.</p>
-              <p className="muted">El organigrama y las herramientas siguen disponibles debajo.</p>
-            </>
-          )}
-        </aside>)}
+        {editing && person && (
+          <aside className="scene-panel">
+            {person ? (
+              <>
+                <h3>{person.name}</h3>
+                <p>{person.role || 'Agente'}</p>
+                <Status value={person.status} />
+                <AgentActivity agent={person} onTask={onTask} />
+                {editing && (
+                  <fieldset>
+                    <legend>Posición del escritorio</legend>
+                    {(['x', 'y'] as const).map((axis) => (
+                      <label key={axis}>
+                        {axis.toUpperCase()}
+                        <input
+                          type="number"
+                          min={axis === 'x' ? 100 : 130}
+                          max={axis === 'x' ? 1100 : 3800}
+                          step="10"
+                          value={desks[person.id]?.[axis] || 0}
+                          onChange={(e) => {
+                            const value = Number(e.target.value);
+                            setDesks((current) => ({
+                              ...current,
+                              [person.id]: {
+                                ...current[person.id],
+                                [axis]: Math.max(
+                                  axis === 'x' ? 100 : 130,
+                                  Math.min(axis === 'x' ? 1100 : 3800, value),
+                                ),
+                              },
+                            }));
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+              </>
+            ) : (
+              <>
+                <h3>Tu equipo</h3>
+                <p>Selecciona una persona para ver su actividad y abrir la tarea.</p>
+                <p className="muted">
+                  El organigrama y las herramientas siguen disponibles debajo.
+                </p>
+              </>
+            )}
+          </aside>
+        )}
       </div>
-          <section className="team-activity" aria-label="Actividad del equipo">
-            <h3>Actividad del equipo</h3>
-            {!connected && <p className="muted">Sin conexión: estos datos pueden estar desactualizados.</p>}
-            <div className="team-activity-grid">{agents.map((agent) => <article key={agent.id} className={`agent-activity-card ${agent.activity?.error ? 'has-error' : ''} ${selected === agent.id ? 'is-selected' : ''}`}>
-              <button className="activity-agent-name" aria-pressed={selected === agent.id} onClick={() => setSelected(agent.id)}>{agent.name}</button>
+      <section className="team-activity" aria-label="Actividad del equipo">
+        <h3>Actividad del equipo</h3>
+        {!connected && (
+          <p className="muted">Sin conexión: estos datos pueden estar desactualizados.</p>
+        )}
+        <div className="team-activity-grid">
+          {agents.map((agent) => (
+            <article
+              key={agent.id}
+              className={`agent-activity-card ${agent.activity?.error ? 'has-error' : ''} ${selected === agent.id ? 'is-selected' : ''}`}
+            >
+              <button
+                className="activity-agent-name"
+                aria-pressed={selected === agent.id}
+                onClick={() => setSelected(agent.id)}
+              >
+                {agent.name}
+              </button>
               <Status value={agent.status} />
               <AgentActivity agent={agent} onTask={onTask} />
-            </article>)}</div>
-          </section>
+            </article>
+          ))}
+        </div>
+      </section>
     </section>
   );
 }

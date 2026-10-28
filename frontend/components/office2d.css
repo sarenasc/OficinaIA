@@ -189,18 +189,111 @@
   padding: 20px;
 }
 
-.team-activity { padding: 22px; border-top: 1px solid #dce4e6; background: #f4f8f7; }
-.agent-activity-card { margin: 0; padding: 18px; border: 1px solid #d8e3e8; border-radius: 12px; background: #fff; }
-.agent-activity-card.has-error { border-color: #d37b77; }
-.agent-activity-detail p { margin: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
-.activity-agent-name { font-weight: 700; margin-bottom: 8px; }
-.activity-error { background: #fff0ef; color: #842c26; padding: 10px; border-radius: 8px; white-space: pre-wrap; }
-.activity-path { font-family: monospace; }
+.team-activity {
+  padding: 22px;
+  border-top: 1px solid #dce4e6;
+  background: #f4f8f7;
+}
+.agent-activity-card {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid #d8e3e8;
+  border-radius: 12px;
+  background: #fff;
+}
+.agent-activity-card.has-error {
+  border-color: #d37b77;
+}
+.agent-activity-detail p {
+  margin: 8px 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.activity-agent-name {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.activity-error {
+  background: #fff0ef;
+  color: #842c26;
+  padding: 10px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+.activity-path {
+  font-family: monospace;
+}
 
-.scene-panel { border-left: 0; border-top: 1px solid #dce4e6; }
+.scene-panel {
+  border-left: 0;
+  border-top: 1px solid #dce4e6;
+}
 
-.team-activity h3 { margin: 0 0 18px; }
-.team-activity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; align-items: start; }
-.agent-activity-card.is-selected { box-shadow: 0 0 0 2px #255d64; }
-.agent-activity-card .activity-agent-name { display: inline-block; margin: 0 10px 8px 0; }
-.agent-activity-card .agent-activity-detail > button { margin-top: 12px; }
+.team-activity h3 {
+  margin: 0 0 18px;
+}
+.team-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.agent-activity-card.is-selected {
+  box-shadow: 0 0 0 2px #255d64;
+}
+.agent-activity-card .activity-agent-name {
+  display: inline-block;
+  margin: 0 10px 8px 0;
+}
+.agent-activity-card .agent-activity-detail > button {
+  margin-top: 12px;
+}
+.floorplan-editor {
+  margin: 20px 0;
+  border: 1px solid #b9cdd0;
+  border-radius: 12px;
+  padding: 20px;
+}
+.floorplan-editor legend {
+  font-weight: 700;
+  color: #294e56;
+}
+.floorplan-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.floorplan-cards {
+  max-height: 360px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr));
+  gap: 16px;
+}
+.floorplan-cards fieldset {
+  min-width: 0;
+  border: 1px solid #d4dfe0;
+  border-radius: 8px;
+  padding: 12px;
+}
+.floorplan-cards label {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.floorplan-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.floorplan-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.floorplan-layer.editing > g {
+  cursor: move;
+  touch-action: none;
+}
+.floorplan-layer > g:focus {
+  outline: 3px solid #3264b3;
+}

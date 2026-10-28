@@ -1,3 +1,4 @@
+import { crossesWall, type Wall } from './floorplan';
 export type Point = { x: number; y: number };
 export const defaultPosition = (index: number): Point => ({
   x: 220 + (index % 4) * 250,
@@ -9,7 +10,13 @@ export const clampPosition = (point: Point): Point => ({
 });
 
 // A grid route keeps a visiting character out of desk tops and within the room.
-export function walkingRoute(start: Point, end: Point, desks: Point[], height: number): Point[] {
+export function walkingRoute(
+  start: Point,
+  end: Point,
+  desks: Point[],
+  height: number,
+  walls: Wall[] = [],
+): Point[] {
   const step = 20;
   const cell = (p: Point) => ({ x: Math.round(p.x / step), y: Math.round(p.y / step) });
   const key = (p: Point) => `${p.x},${p.y}`;
@@ -41,6 +48,8 @@ export function walkingRoute(start: Point, end: Point, desks: Point[], height: n
         py = next.y * step;
       if (px < 55 || px > 1140 || py < 120 || py > height - 70 || previous.has(key(next))) continue;
       if (desks.some((d) => Math.abs(px - d.x) < 115 && py > d.y - 100 && py < d.y + 110)) continue;
+      if (crossesWall({ x: current.x * step, y: current.y * step }, { x: px, y: py }, walls))
+        continue;
       previous.set(key(next), current);
       queue.push(next);
     }

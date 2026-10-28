@@ -1,7 +1,8 @@
 import copy
+from typing import Literal
 
 from fastapi import Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
@@ -16,9 +17,50 @@ class Point(BaseModel):
     y: float = Field(ge=130, le=3800, allow_inf_nan=False)
 
 
+class Room(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=60)
+    x: float = Field(ge=60, le=1140, allow_inf_nan=False)
+    y: float = Field(ge=120, le=3800, allow_inf_nan=False)
+    width: float = Field(ge=200, le=1080, allow_inf_nan=False)
+    depth: float = Field(ge=200, le=3600, allow_inf_nan=False)
+    door: Literal['top', 'bottom', 'left', 'right'] = 'bottom'
+
+    @model_validator(mode='after')
+    def bounds(self):
+        if self.x + self.width > 1140 or self.y + self.depth > 3900:
+            raise ValueError('La sala debe quedar dentro del plano')
+        return self
+
+
+class Partition(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    x: float = Field(ge=60, le=1140, allow_inf_nan=False)
+    y: float = Field(ge=120, le=3800, allow_inf_nan=False)
+    length: float = Field(ge=160, le=3600, allow_inf_nan=False)
+    orientation: Literal['horizontal', 'vertical'] = 'horizontal'
+    doorway: bool = True
+
+    @model_validator(mode='after')
+    def bounds(self):
+        if (self.orientation == 'horizontal' and self.x + self.length > 1140
+                or self.orientation == 'vertical' and self.y + self.length > 3900):
+            raise ValueError('La división debe quedar dentro del plano')
+        return self
+
+
 class Layout(BaseModel):
     revision: int = Field(ge=0)
     desks: dict[str, Point] = Field(max_length=500)
+    rooms: list[Room] | None = Field(default=None, max_length=40)
+    partitions: list[Partition] | None = Field(default=None, max_length=80)
+
+    @model_validator(mode='after')
+    def unique_ids(self):
+        items = [*(self.rooms or []), *(self.partitions or [])]
+        if len({item.id for item in items}) != len(items):
+            raise ValueError('Cada sala y división debe tener un identificador único')
+        return self
 
 
 @router.get("/offices/{id}/scene")
@@ -96,9 +138,12 @@ def save_layout(id: str, payload: Layout, session: Session = Depends(get_session
     if not set(payload.desks).issubset(allowed):
         raise HTTPException(422, "El plano contiene agentes de otra oficina o eliminados")
     visual = copy.deepcopy(office.visual or {})
+    previous = visual.get('floorplan', {})
     layout = {
         "revision": payload.revision + 1,
         "desks": {key: point.model_dump() for key, point in payload.desks.items()},
+        "rooms": [room.model_dump() for room in payload.rooms] if payload.rooms is not None else previous.get('rooms', []),
+        "partitions": [part.model_dump() for part in payload.partitions] if payload.partitions is not None else previous.get('partitions', []),
     }
     visual["floorplan"] = layout
     revision = func.coalesce(m.Office.visual["floorplan"]["revision"].as_integer(), 0)

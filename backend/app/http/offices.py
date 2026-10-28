@@ -47,6 +47,7 @@ def duplicate_office(id: str, session: Session = Depends(get_session)):
     if "floorplan" in (office.visual or {}):
         visual = copy.deepcopy(office.visual)
         visual["floorplan"] = {
+            **visual["floorplan"],
             "revision": 0,
             "desks": {
                 agents[key]: value for key, value in visual["floorplan"].get("desks", {}).items() if key in agents
