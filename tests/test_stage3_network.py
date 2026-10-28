@@ -1,3 +1,4 @@
+import gzip
 import json
 import threading
 import time
@@ -24,7 +25,17 @@ def server():
                 self.end_headers()
                 return
             content = b"team,goals\nA,2\nB,1\n" if self.path == "/sports.csv" else json.dumps({"fixture": "local-api", "games": 3}).encode()
+            if self.path == '/gzip-large':
+                content = b'x' * 100000
+            if self.path.startswith('/gzip'):
+                content = gzip.compress(content)
+                if self.path == '/gzip-invalid':
+                    content = b'not gzip'
+                elif self.path == '/gzip-truncated':
+                    content = content[:-5]
             self.send_response(200)
+            if self.path.startswith('/gzip'):
+                self.send_header('Content-Encoding', 'gzip')
             self.send_header("Content-Type", "text/csv" if self.path == "/sports.csv" else "application/json")
             self.send_header("Content-Length", str(len(content)))
             self.end_headers()
@@ -59,6 +70,18 @@ def test_real_http_transport_timeout_size_and_redirect_authorization(server):
         network.request(server + "/api", allowed, max_bytes=5, allow_private=True)
     with pytest.raises(PermissionError, match="redirect"):
         network.request(server + "/redirect", allowed, allow_private=True)
+
+
+def test_gzip_transport_is_bounded_and_rejects_invalid_content(server):
+    def allowed(url):
+        return None
+    response = network.request(server + '/gzip', allowed, allow_private=True)
+    assert json.loads(response['body'])['games'] == 3
+    with pytest.raises(ValueError, match='tamaño'):
+        network.request(server + '/gzip-large', allowed, max_bytes=1000, allow_private=True)
+    for endpoint in ['/gzip-invalid', '/gzip-truncated']:
+        with pytest.raises(ValueError, match='gzip'):
+            network.request(server + endpoint, allowed, allow_private=True)
 
 
 def test_private_api_requires_explicit_approval_even_trusted(client, tmp_path, server):

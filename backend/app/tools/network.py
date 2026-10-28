@@ -6,6 +6,7 @@ import socket
 import ssl
 import threading
 import time
+import zlib
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -102,8 +103,9 @@ def request(url, authorize_url, timeout=20, headers=None, method="GET", body=Non
                     raise PermissionError("Redirección a HTTP inseguro bloqueada")
                 url = destination
                 continue
-            if response.getheader("Content-Encoding", "identity") != "identity":
-                raise ValueError("Respuesta comprimida no admitida; solicite identity")
+            encoding = response.getheader("Content-Encoding", "identity").lower().strip()
+            if encoding not in {"identity", "gzip"}:
+                raise ValueError("Codificación HTTP no admitida; solicite identity o gzip")
             if int(response.getheader("Content-Length", "0")) > max_bytes:
                 raise ValueError("HTTP excede el tamaño máximo")
             chunks, size = [], 0
@@ -119,8 +121,19 @@ def request(url, authorize_url, timeout=20, headers=None, method="GET", body=Non
                 if size > max_bytes:
                     raise ValueError("HTTP excede el tamaño máximo")
                 chunks.append(chunk)
+            content = b"".join(chunks)
+            if encoding == 'gzip':
+                decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                try:
+                    content = decoder.decompress(content, max_bytes + 1)
+                except zlib.error:
+                    raise ValueError('Respuesta gzip inválida') from None
+                if len(content) > max_bytes or decoder.unconsumed_tail:
+                    raise ValueError('HTTP descomprimido excede el tamaño máximo')
+                if not decoder.eof or decoder.unused_data:
+                    raise ValueError('Respuesta gzip incompleta o con datos adicionales')
             return {"url": url, "status": response.status, "content_type": response.getheader("Content-Type", ""),
-                    "body": b"".join(chunks), "consulted_at": datetime.now(timezone.utc).isoformat(), "errors": []}
+                    "body": content, "consulted_at": datetime.now(timezone.utc).isoformat(), "errors": []}
         finally:
             if response is not None:
                 response.close()
