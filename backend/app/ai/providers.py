@@ -27,6 +27,21 @@ class ModelCallError(ValueError):
         self.attempts = attempts
 
 
+# Closed JSON shape supported by Claude structured outputs. Tool arguments remain
+# a JSON string on the wire because arbitrary dictionary keys cannot be expressed
+# in a closed schema; they are decoded and validated before any tool can run.
+ANTHROPIC_ACTION_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'type': {'type': 'string', 'enum': ['tool', 'delegate', 'final']},
+        'name': {'type': 'string'},
+        'arguments_json': {'type': 'string', 'description': 'Tool arguments serialized as a valid JSON object string'},
+        'agent_id': {'type': 'string'}, 'request': {'type': 'string'}, 'content': {'type': 'string'},
+    },
+    'required': ['type'], 'additionalProperties': False,
+}
+
+
 def canonical_action(value: dict) -> dict:
     """Never replay model-invented tool results as trusted conversation state."""
     keys = {"tool": ("type", "name", "arguments"),
@@ -49,13 +64,30 @@ class AIProvider(ABC):
     async def complete(self, provider: Provider, agent: Agent, model: str, messages: list[dict]) -> AIResponse: ...
 
 
-def parse_response(content: str) -> dict:
-    content = content.strip()
+def parse_response(content: str, *, encoded_arguments=False) -> dict:
+    if not isinstance(content, str) or not content.strip():
+        raise ModelCallError('El modelo devolvió una respuesta vacía; no se ejecutó ninguna acción', 'invalid_model_action')
+    content = content.strip().lstrip('\ufeff')
     if content.startswith("```"):
+        if '\n' not in content or not content.endswith('```'):
+            raise ModelCallError('El modelo devolvió un bloque JSON incompleto', 'invalid_model_action')
         content = content.split("\n", 1)[1].rsplit("```", 1)[0]
-    value = json.loads(content)
+    try:
+        value = json.loads(content)
+    except (ValueError, TypeError):
+        raise ModelCallError('El modelo devolvió texto o JSON mal formado en lugar de una acción válida; '
+                             'no se ejecutó ninguna acción', 'invalid_model_action') from None
     if not isinstance(value, dict) or value.get("type") not in {"tool", "delegate", "final"}:
-        raise ValueError("El modelo no devolvió una acción JSON válida")
+        raise ModelCallError('El modelo no devolvió una acción JSON válida', 'invalid_model_action')
+    if encoded_arguments and value.get('type') == 'tool' and 'arguments_json' in value:
+        try:
+            value['arguments'] = json.loads(value.pop('arguments_json'))
+        except (ValueError, TypeError):
+            raise ModelCallError('El modelo devolvió argumentos de herramienta con JSON inválido', 'invalid_model_action') from None
+    try:
+        canonical_action(value)
+    except (ValueError, TypeError):
+        raise ModelCallError('El modelo devolvió una acción incompleta o argumentos inválidos', 'invalid_model_action') from None
     return value
 
 
@@ -116,6 +148,11 @@ class HTTPProvider(AIProvider):
                 endpoint = base + "/messages"
                 headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
                 body = {"model": model, "max_tokens": 4096, "system": messages[0]["content"], "messages": messages[1:]}
+                body['output_config'] = {'format': {'type': 'json_schema', 'schema': ANTHROPIC_ACTION_SCHEMA}}
+                body['system'] += ('\nFormato de transporte: devuelve un objeto con type=tool/delegate/final. '
+                                   'Para tool usa name y arguments_json (argumentos serializados como cadena JSON), '
+                                   'no el campo arguments. Para delegate usa agent_id y request; para final usa content. '
+                                   'No agregues explicaciones fuera del objeto ni resultados de herramientas inventados.')
             elif provider.kind == "gemini":
                 endpoint = base + "/models/" + quote(model.removeprefix("models/"), safe="") + ":generateContent"
                 headers = {"x-goog-api-key": key}
@@ -158,7 +195,13 @@ class HTTPProvider(AIProvider):
             if response.status_code >= 400:
                 # Do not leak error bodies, request headers or credential-bearing URLs.
                 raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}", "provider_http", attempts)
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                raise ModelCallError(f'Proveedor {provider.kind}: HTTP {response.status_code} sin un cuerpo JSON válido '
+                                     '(respuesta vacía o no JSON)', 'provider_response', attempts) from None
+            if not isinstance(data, dict):
+                raise ModelCallError(f'Proveedor {provider.kind}: estructura de respuesta HTTP inválida', 'provider_response', attempts)
         if provider.kind == "ollama":
             if data.get("done_reason") == "length":
                 raise ValueError(
@@ -172,7 +215,17 @@ class HTTPProvider(AIProvider):
             content = data["choices"][0]["message"]["content"]
             tin, tout = data.get("usage", {}).get("prompt_tokens", 0), data.get("usage", {}).get("completion_tokens", 0)
         elif provider.kind == "anthropic":
-            content = "".join(part["text"] for part in data["content"] if part["type"] == "text")
+            if data.get('stop_reason') == 'max_tokens':
+                raise ModelCallError('Claude cortó la respuesta por el límite de tokens; reduzca la salida solicitada',
+                                     'model_truncated', attempts)
+            if data.get('stop_reason') == 'refusal':
+                raise ModelCallError('Claude rechazó la solicitud; revise la tarea antes de volver a intentarla',
+                                     'model_refusal', attempts)
+            blocks = data.get('content')
+            if not isinstance(blocks, list):
+                raise ModelCallError('Claude devolvió una estructura de respuesta inesperada', 'provider_response', attempts)
+            content = "".join(part.get('text', '') for part in blocks
+                              if isinstance(part, dict) and part.get('type') == 'text' and isinstance(part.get('text'), str))
             tin, tout = data.get("usage", {}).get("input_tokens", 0), data.get("usage", {}).get("output_tokens", 0)
         else:
             content = "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"])
@@ -192,7 +245,7 @@ class HTTPProvider(AIProvider):
             metrics.update(prompt_eval_count=tin, eval_count=tout)
             if data.get("eval_duration", 0) > 0:
                 metrics["generation_rate_per_second"] = tout * 1000000000 / data["eval_duration"]
-        return AIResponse(parse_response(content), tin, tout, metrics)
+        return AIResponse(parse_response(content, encoded_arguments=provider.kind == 'anthropic'), tin, tout, metrics)
 
 
 providers: dict[str, AIProvider] = {kind: HTTPProvider() for kind in ["ollama", "openai", "anthropic", "gemini"]}

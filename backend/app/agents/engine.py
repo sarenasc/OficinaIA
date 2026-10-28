@@ -12,7 +12,7 @@ from app.agents.calculations import terminal_values, verified_final
 from app.agents.direct_tools import direct_tool_request
 from app.agents.failures import failure_info
 from app.agents.research import preflight
-from app.ai.providers import canonical_action, providers
+from app.ai.providers import ModelCallError, canonical_action, providers
 from app.core.audit import audit, redact
 from app.core.config import MAX_STEPS
 from app.core.db import SessionLocal
@@ -194,6 +194,8 @@ async def call_tool(session, task, agent, name, arguments):
 async def model_action(session: Session, task: Task, agent: Agent, messages: list[dict]):
     candidates = [{"provider_id": agent.provider_id, "model": agent.model}, *agent.fallbacks]
     errors = []
+    last_error = None
+    format_only = True
     for candidate in candidates:
         provider = session.get(Provider, candidate["provider_id"]) if candidate.get("provider_id") else None
         model = candidate.get("model") or (provider.default_model if provider else "")
@@ -248,6 +250,9 @@ async def model_action(session: Session, task: Task, agent: Agent, messages: lis
                 ) / 1000000
             return action
         except Exception as exc:
+            last_error = exc
+            if not isinstance(exc, ModelCallError) or exc.category != 'invalid_model_action':
+                format_only = False
             execution.status, execution.error = "error", redact(str(exc).strip() or type(exc).__name__)
             metrics = {"error_category": getattr(exc, "category", "model_response"),
                        "attempts": getattr(exc, "attempts", 1), "usage_available": False}
@@ -266,7 +271,13 @@ async def model_action(session: Session, task: Task, agent: Agent, messages: lis
                 task.id,
                 agent.id,
             )
-    raise ValueError("No se pudo completar una llamada IA: " + "; ".join(errors))
+    message = "No se pudo completar una llamada IA: " + "; ".join(errors)
+    if isinstance(last_error, ModelCallError):
+        category = last_error.category
+        if category == 'invalid_model_action' and not format_only:
+            category = 'mixed_model_errors'
+        raise ModelCallError(message, category, last_error.attempts)
+    raise ValueError(message)
 
 
 async def run_agents(session: Session, task: Task):
@@ -316,7 +327,21 @@ async def run_agents(session: Session, task: Task):
             total = sum(len(m["content"]) for m in frame["messages"])
             if total > agent.context_limit * 4:
                 raise ValueError("Contexto excede el límite configurado; divida la tarea")
-            action = await model_action(session, task, agent, frame["messages"])
+            try:
+                action = await model_action(session, task, agent, frame["messages"])
+            except ModelCallError as exc:
+                if exc.category != 'invalid_model_action' or frame.get('format_corrections', 0) >= 1:
+                    raise
+                frame['format_corrections'] = frame.get('format_corrections', 0) + 1
+                frame['steps'] += 1
+                context['total_steps'] = context.get('total_steps', 0) + 1
+                frame['messages'].append({'role': 'user', 'content':
+                    'Tu respuesta anterior no contenía una acción válida y no se ejecutó. '
+                    'Devuelve solo la siguiente acción en el formato estructurado indicado por el sistema, '
+                    'con todos sus campos requeridos. Usa los resultados ya recibidos; no repitas herramientas ejecutadas.'})
+                save_context(session, task, context)
+                audit(session, 'model.format_retry', {'reason': str(exc), 'attempt': 1}, task.id, agent.id)
+                continue
             frame["pending"] = action
             frame["messages"].append({"role": "assistant", "content": json.dumps(action, ensure_ascii=False)})
             save_context(session, task, context)

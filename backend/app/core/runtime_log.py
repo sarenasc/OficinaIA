@@ -51,6 +51,7 @@ EVENTS = {
     'agent.delegated': 'Tarea delegada', 'agent.failed': 'Fallo del agente',
     'model.started': 'Consultando modelo IA', 'model.completed': 'Respuesta del modelo recibida',
     'model.error': 'Falló la consulta al modelo',
+    'model.format_retry': 'Respuesta IA con formato inválido; solicitando una única corrección',
     'tool.started': 'Ejecutando herramienta', 'tool.completed': 'Herramienta completada',
     'tool.error': 'Falló la herramienta', 'tool.waiting_approval': 'Herramienta esperando aprobación',
     'tool.loop_blocked': 'Se detuvo una repetición de herramienta sin progreso',

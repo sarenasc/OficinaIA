@@ -2,7 +2,7 @@ import json
 
 import httpx
 import pytest
-from app.ai.providers import HTTPProvider
+from app.ai.providers import HTTPProvider, ModelCallError, parse_response
 from app.models import Agent, Provider
 from app.security.secrets import secrets
 
@@ -58,3 +58,59 @@ async def test_http_provider_contract(kind, url, path, monkeypatch):
     if kind == "ollama":
         assert response.metrics["load_ms"] == 100 and response.metrics["total_ms"] == 600
         assert response.metrics["generation_rate_per_second"] == 20
+
+
+async def test_anthropic_structured_action_decodes_tool_arguments(monkeypatch):
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['output_config']['format']['type'] == 'json_schema'
+        assert body['output_config']['format']['schema']['additionalProperties'] is False
+        assert 'arguments_json' in body['system']
+        # Opus 5.5 does not support forced tool_choice; this uses JSON outputs instead.
+        assert 'tool_choice' not in body
+        action = {'type': 'tool', 'name': 'api.request', 'arguments_json': json.dumps({
+            'connection_id': 'authorized-id', 'endpoint': 'scoreboard', 'params': {'dates': '20261025'}})}
+        return httpx.Response(200, json={'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': json.dumps(action)}]})
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(secrets, 'get', lambda ref: 'fixture-key')
+    response = await HTTPProvider().complete(Provider(kind='anthropic', url='https://api.anthropic.com/v1'),
+        Agent(temperature=0.2, context_limit=8192), 'claude-opus-5-5',
+        [{'role': 'system', 'content': 'Actúa en JSON'}, {'role': 'user', 'content': 'Consulta'}])
+    assert response.action['arguments']['params']['dates'] == '20261025'
+    assert 'arguments_json' not in response.action
+
+
+@pytest.mark.parametrize('case,category', [
+    ('http_empty', 'provider_response'), ('http_html', 'provider_response'),
+    ('text', 'invalid_model_action'), ('empty_content', 'invalid_model_action'),
+    ('truncated', 'model_truncated'), ('refusal', 'model_refusal'),
+])
+async def test_anthropic_errors_are_specific_without_exposing_body_or_replaying(case, category, monkeypatch):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        if case.startswith('http_'):
+            return httpx.Response(200, content=b'' if case == 'http_empty' else b'<html>PRIVATE-DATA</html>')
+        stop = {'truncated': 'max_tokens', 'refusal': 'refusal'}.get(case, 'end_turn')
+        text = '' if case == 'empty_content' else 'PRIVATE-DATA respuesta sin JSON'
+        return httpx.Response(200, json={'stop_reason': stop, 'content': [{'type': 'text', 'text': text}]})
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(secrets, 'get', lambda ref: 'fixture-key')
+    with pytest.raises(ModelCallError) as error:
+        await HTTPProvider().complete(Provider(kind='anthropic', url='https://api.anthropic.com/v1'),
+            Agent(temperature=0.2, context_limit=8192), 'claude-opus-5-5',
+            [{'role': 'system', 'content': 'JSON'}, {'role': 'user', 'content': 'Hola'}])
+    assert error.value.category == category
+    assert 'PRIVATE-DATA' not in str(error.value)
+    assert 'Expecting value' not in str(error.value)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('content', ['```', 'no es json', '[]', '{"type":"tool"}',
+    '{"type":"tool","name":"api.request","arguments_json":"invalid"}'])
+def test_invalid_model_actions_have_safe_errors(content):
+    with pytest.raises(ModelCallError) as error:
+        parse_response(content, encoded_arguments=True)
+    assert error.value.category == 'invalid_model_action'
