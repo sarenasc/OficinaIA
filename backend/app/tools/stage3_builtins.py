@@ -1,0 +1,42 @@
+from app.tools.builtins import RESOURCE, TEXT, schema
+
+PARAMETERS = {"type": "object", "maxProperties": 100, "additionalProperties": {"type": ["string", "number", "boolean", "null"]}}
+SOURCE = schema(RESOURCE, ["resource_id", "path"])
+TOOLS = [
+    ("sports.analyze", "Analizar CSV deportivo real por grupo: totales, media y Poisson(0). Operación fija sin código IA", "sports.analyze",
+     schema({**RESOURCE, "group_column": {"type": "string", "minLength": 1, "maxLength": 200},
+             "value_column": {"type": "string", "minLength": 1, "maxLength": 200}, "output_path": TEXT},
+            ["resource_id", "path", "group_column", "value_column"]), ["sports.analyze"]),
+    ("agents.list", "Consultar agentes y delegaciones autorizadas de esta oficina", "agents.list", schema({}, []), []),
+    ("tasks.status", "Consultar estado y pasos de una tarea de esta oficina", "tasks.status", schema({"task_id": TEXT}, []), []),
+    ("web.search", "Buscar con Brave Search configurado y credencial segura", "web.search",
+     schema({"query": {"type": "string", "minLength": 1, "maxLength": 1000},
+             "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
+             "language": {"type": "string", "pattern": "^[a-z]{2}(-[a-z]{2})?$"},
+             "date_range": {"type": "string", "pattern": "^(pd|pw|pm|py|[0-9]{4}-[0-9]{2}-[0-9]{2}to[0-9]{4}-[0-9]{2}-[0-9]{2})$"}}, ["query"]), ["internet.access"]),
+    ("web.fetch", "Leer URL pública asignada, con SSRF y redirecciones validadas", "web.fetch",
+     schema({"url": TEXT, "timeout": {"type": "integer", "minimum": 1, "maximum": 60},
+             "destination": SOURCE}, ["url"]), ["internet.access"]),
+    ("web.download", "Descargar dataset autorizado CSV/JSON/XLSX de hasta 10 MB", "web.download",
+     schema({"url": TEXT, "destination": schema(RESOURCE, ["resource_id"]), "filename": TEXT}, ["url", "destination"]), ["internet.access"]),
+    ("api.request", "API configurada. Escritura o destino privado exige aprobación independiente", "api.request",
+     schema({"connection_id": TEXT, "endpoint": TEXT, "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+             "params": PARAMETERS, "destination": SOURCE}, ["connection_id", "endpoint"]), ["internet.access"]),
+    ("python.packages", "Consultar versiones del contenedor aislado; no instala paquetes", "python.packages", schema({}, []), ["python.execute"]),
+    ("sql.execute", "DML transaccional en tablas autorizadas; siempre exige aprobación", "sql.execute",
+     schema({"connection_id": TEXT, "query": TEXT, "parameters": PARAMETERS}, ["connection_id", "query"]), ["sql.write"]),
+    ("pdf.read", "Extraer texto y metadatos de PDF autorizado; sin OCR", "pdf.read", SOURCE, []),
+    ("pdf.merge", "Combinar PDF autorizados y verificar salida", "pdf.merge",
+     schema({**RESOURCE, "sources": {"type": "array", "items": SOURCE, "minItems": 1, "maxItems": 20}}, ["resource_id", "path", "sources"]), []),
+    ("pdf.create", "Crear PDF con tablas, gráficos, imágenes locales, fuentes y paginación", "pdf.create",
+     schema({**RESOURCE, "title": {"type": "string", "minLength": 1, "maxLength": 500},
+             "paragraphs": {"type": "array", "items": {"type": "string", "maxLength": 10000}, "maxItems": 100},
+             "tables": {"type": "array", "maxItems": 20, "items": schema({
+                 "headers": {"type": "array", "items": TEXT, "minItems": 1, "maxItems": 10},
+                 "rows": {"type": "array", "maxItems": 1000, "items": {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}, "maxItems": 10}}}, ["headers", "rows"])},
+             "charts": {"type": "array", "maxItems": 10, "items": schema({"title": TEXT,
+                 "labels": {"type": "array", "items": TEXT, "minItems": 1, "maxItems": 50},
+                 "values": {"type": "array", "items": {"type": "number"}, "minItems": 1, "maxItems": 50}}, ["title", "labels", "values"])},
+             "images": {"type": "array", "maxItems": 10, "items": schema({**RESOURCE, "caption": TEXT}, ["resource_id", "path"])},
+             "sources": {"type": "array", "maxItems": 100, "items": TEXT}, "header": TEXT, "footer": TEXT}, ["resource_id", "path", "title"]), []),
+]

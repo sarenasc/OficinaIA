@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "coordinator": "coordinador",
+  "agents": [
+    {
+      "key": "coordinador",
+      "name": "Coordinador",
+      "role": "Coordinador de tareas",
+      "goal": "Organizar solicitudes y comprobar resultados",
+      "instructions": "Delega a los especialistas autorizados. No inventes resultados ni archivos.",
+      "delegates": ["analista", "reportes"],
+      "mode": "safe",
+      "external_policy": "never",
+      "memory_mode": "off"
+    },
+    {
+      "key": "analista",
+      "name": "Analista",
+      "role": "Analista de datos",
+      "goal": "Analizar datos reales y preparar gráficos",
+      "tools": ["filesystem.list", "excel.read", "excel.chart"],
+      "context_limit": 8192,
+      "temperature": 0.2,
+      "mode": "safe"
+    },
+    {
+      "key": "reportes",
+      "name": "Generador de Reportes",
+      "role": "Especialista en reportes",
+      "goal": "Crear archivos y reportes comprobados",
+      "tools": ["excel.create", "excel.generate_sales"],
+      "context_limit": 8192,
+      "temperature": 0.2,
+      "mode": "safe"
+    }
+  ]
+}

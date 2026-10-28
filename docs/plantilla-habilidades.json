@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "Analizar ventas y crear gráfico Excel",
+      "description": "Leer un libro de ventas y graficar totales por categoría.",
+      "instructions": "Identifica el archivo real con filesystem.list. Lee sus cabeceras con excel.read. Usa excel.chart para sumar la columna de ventas por categoría y agregar el gráfico. No calcules totales usando solo la muestra enviada al modelo. Comunica errores y espera las aprobaciones requeridas.",
+      "required_tools": ["filesystem.list", "excel.read", "excel.chart"],
+      "examples": "Lee ventas.xlsx y suma total por producto en una pestaña nueva GraficoVentas.",
+      "output_format": "Ruta comprobada del archivo, hoja del gráfico, filas procesadas y total calculado."
+    }
+  ]
+}

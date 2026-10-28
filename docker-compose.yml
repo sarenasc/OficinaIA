@@ -1,0 +1,59 @@
+name: oficina-ia-local
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: office
+      POSTGRES_DB: office
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD en .env}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U office -d office"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  backend:
+    profiles: ["container-api"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      OFFICE_DATABASE_URL: postgresql+psycopg://office:${POSTGRES_PASSWORD}@postgres:5432/office
+      OFFICE_REDIS_URL: redis://redis:6379/0
+      OFFICE_OLLAMA_URL: http://host.docker.internal:11434
+      OFFICE_SESSION_TOKEN: ${OFFICE_SESSION_TOKEN:?Defina token solo si usa el perfil container-api}
+      OFFICE_DATA_DIR: /data
+    ports: ["127.0.0.1:38080:38080"]
+    volumes: ["backend-data:/data"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  python-sandbox:
+    profiles: ["sandbox-build"]
+    build: ./sandbox
+    image: oficina-python-sandbox:local
+    network_mode: none
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 64
+volumes:
+  postgres-data:
+  redis-data:
+  backend-data:

@@ -1,0 +1,206 @@
+.office-scene {
+  border: 1px solid #dce4e6;
+  border-radius: 16px;
+  background: #fafcfb;
+  margin: 18px 0;
+  overflow: hidden;
+}
+.scene-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 22px;
+  gap: 16px;
+}
+.scene-toolbar p {
+  margin: 6px 0 0;
+}
+.scene-toolbar button {
+  margin-left: 8px;
+}
+.scene-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.scene-canvas {
+  max-height: 650px;
+  overflow: auto;
+  background: #e1e8e5;
+}
+.scene-canvas svg {
+  display: block;
+  width: 100%;
+  min-width: 650px;
+}
+.scene-panel {
+  padding: 20px;
+  border-left: 1px solid #dce4e6;
+}
+.scene-panel p {
+  overflow-wrap: anywhere;
+}
+.scene-panel button {
+  display: block;
+  margin-top: 14px;
+}
+.scene-panel label {
+  display: block;
+  margin-top: 12px;
+}
+.scene-panel input {
+  width: 100%;
+}
+.desk {
+  cursor: pointer;
+  outline: none;
+}
+.desk:focus > ellipse {
+  stroke: #3264b3;
+  stroke-width: 3;
+}
+.working .hands {
+  animation: office-type 0.24s ease-in-out infinite alternate;
+  transform-origin: 0px 25px;
+}
+.working .person {
+  animation: office-work 1.2s ease-in-out infinite alternate;
+}
+.waiting .person {
+  animation: office-wait 2s ease-in-out infinite alternate;
+}
+.error > rect:first-of-type {
+  stroke: #c04d47;
+  stroke-width: 4;
+}
+.approval .person {
+  animation: office-wait 1.5s ease-in-out infinite alternate;
+}
+.disabled .person {
+  opacity: 0.5;
+}
+.disconnected * {
+  animation-play-state: paused !important;
+}
+@keyframes office-type {
+  to {
+    transform: translateY(3px) rotate(3deg);
+  }
+}
+@keyframes office-work {
+  to {
+    transform: translateY(-3px);
+  }
+}
+@keyframes office-wait {
+  to {
+    transform: rotate(5deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .office-scene * {
+    animation: none !important;
+  }
+}
+@media (max-width: 1000px) {
+  .scene-body {
+    grid-template-columns: 1fr;
+  }
+  .scene-panel {
+    border-left: 0;
+    border-top: 1px solid #dce4e6;
+  }
+}
+.office-scene .scene-panel {
+  background: #fff;
+  color: #253b4a;
+  min-height: 0;
+  height: auto;
+  width: auto;
+  position: static;
+}
+.scene-body {
+  align-items: start;
+}
+
+.office-scene .desk {
+  touch-action: none;
+}
+.scene-instructions {
+  padding: 0 22px;
+  font-size: 13px;
+  color: #617581;
+}
+.walking .person {
+  animation: office-step 0.28s ease-in-out infinite alternate;
+}
+.walking .hands {
+  animation: none;
+}
+.walking .person > path:first-child {
+  animation: office-stride 0.28s ease-in-out infinite alternate;
+  transform-origin: 0 70px;
+}
+@keyframes office-step {
+  to {
+    transform: translateY(-5px);
+  }
+}
+@keyframes office-stride {
+  to {
+    transform: rotate(10deg);
+  }
+}
+
+.office-view-switch {
+  display: flex;
+  gap: 4px;
+}
+.office-view-switch button[aria-pressed='true'] {
+  background: #255d64;
+  color: white;
+}
+.scene-toolbar {
+  flex-wrap: wrap;
+}
+.office-3d {
+  min-width: 0;
+}
+.office-3d-canvas {
+  height: 570px;
+  background: #e5ece7;
+  width: 100%;
+  position: relative;
+}
+.office-3d-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.office-3d-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px;
+}
+.office-3d-people button {
+  font-size: 12px;
+}
+.office-3d [role='alert'] {
+  padding: 20px;
+}
+
+.team-activity { padding: 22px; border-top: 1px solid #dce4e6; background: #f4f8f7; }
+.agent-activity-card { margin: 0; padding: 18px; border: 1px solid #d8e3e8; border-radius: 12px; background: #fff; }
+.agent-activity-card.has-error { border-color: #d37b77; }
+.agent-activity-detail p { margin: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
+.activity-agent-name { font-weight: 700; margin-bottom: 8px; }
+.activity-error { background: #fff0ef; color: #842c26; padding: 10px; border-radius: 8px; white-space: pre-wrap; }
+.activity-path { font-family: monospace; }
+
+.scene-panel { border-left: 0; border-top: 1px solid #dce4e6; }
+
+.team-activity h3 { margin: 0 0 18px; }
+.team-activity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; align-items: start; }
+.agent-activity-card.is-selected { box-shadow: 0 0 0 2px #255d64; }
+.agent-activity-card .activity-agent-name { display: inline-block; margin: 0 10px 8px 0; }
+.agent-activity-card .agent-activity-detail > button { margin-top: 12px; }
