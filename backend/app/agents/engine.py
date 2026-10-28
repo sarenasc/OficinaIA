@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.calculations import terminal_values, verified_final
 from app.agents.direct_tools import direct_tool_request
+from app.agents.failures import failure_info
 from app.agents.research import preflight
 from app.ai.providers import canonical_action, providers
 from app.core.audit import audit, redact
@@ -560,6 +561,11 @@ class TaskWorker:
                 raise
             except Exception as exc:
                 task.status, task.error = "error", redact(str(exc))
+                failure = failure_info(session, task)
+                if failure:
+                    task.context = {**task.context, 'failure': failure}
+                    task.error = failure['message']
+                    audit(session, 'agent.failed', failure, task.id, failure['agent_id'])
                 task.finished_at = datetime.now(timezone.utc)
             finally:
                 involved = {task.agent_id}
@@ -571,7 +577,9 @@ class TaskWorker:
                         current.status = (
                             "waiting"
                             if task.status == "waiting_approval"
-                            else ("error" if task.status == "error" else "active")
+                            else ("error" if task.status == "error" and
+                                  current.id == (task.context.get('failure') or {}).get('agent_id', task.agent_id)
+                                  else "active")
                         )
                 session.commit()
                 audit(session, "task." + task.status, {"result": task.result, "error": task.error}, task.id)

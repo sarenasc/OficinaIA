@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app import models as m
 from app import schemas as s
 from app.agents.engine import worker
+from app.agents.failures import failure_info, task_error
 from app.core.audit import audit
 from app.core.db import get_session
 from app.http.common import get_or_404, router, serialize
@@ -90,7 +91,8 @@ async def decide_approval(id: str, data: s.ApprovalInput, session: Session = Dep
 @router.get("/tasks/{id}/details")
 def task_details(id: str, session: Session = Depends(get_session)):
     task = get_or_404(session, m.Task, id)
-    result = {"task": serialize(task)}
+    result = {"task": {**serialize(task), 'error': task_error(session, task)},
+              'failure': failure_info(session, task)}
     for key, cls in {
         "executions": m.Execution,
         "messages": m.Message,

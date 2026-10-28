@@ -7,6 +7,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app import models as m
+from app.agents.failures import failure_info, task_error
 from app.core.audit import redact
 from app.core.db import get_session
 from app.http.common import get_or_404, router, serialize
@@ -93,7 +94,7 @@ def scene(id: str, session: Session = Depends(get_session)):
                 "execution_status": execution.status,
                 "path": redact(outputs.get("path") or inputs.get("path") or ""),
                 "resource": resource.name if resource else "",
-                "error": redact(execution.error or task.error or ""),
+                "error": task_error(session, task) if task.error else redact(execution.error or ""),
                 "updated_at": execution.created_at.isoformat(),
             }
     for task in session.scalars(
@@ -105,10 +106,19 @@ def scene(id: str, session: Session = Depends(get_session)):
                 "request": task.request,
                 "task_status": task.status,
                 "tool": "",
-                "error": redact(task.error or ""),
+                "error": task_error(session, task),
                 "updated_at": task.created_at.isoformat(),
             }
             activity_dates[task.agent_id] = task.created_at
+        failure = failure_info(session, task)
+        if failure and failure['agent_id'] != task.agent_id:
+            failed_id = failure['agent_id']
+            if failed_id not in latest or task.created_at > activity_dates[failed_id]:
+                latest[failed_id] = {
+                    'task_id': task.id, 'request': task.request, 'task_status': task.status,
+                    'tool': '', 'error': failure['reason'], 'updated_at': task.created_at.isoformat(),
+                }
+                activity_dates[failed_id] = task.created_at
     return {
         "office": {"id": office.id, "name": office.name},
         "layout": (office.visual or {}).get("floorplan", {"revision": 0, "desks": {}}),
