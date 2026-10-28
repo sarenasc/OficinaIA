@@ -101,7 +101,10 @@ def instructions(session: Session, agent: Agent) -> str:
                      "reciben sus campos dentro de parameters. No mezcle operation/parameters con code/resources; código libre exige Docker.")
     if any(name.startswith("web.") or name == "api.request" for name in names):
         hints.append("Primero compruebe conexiones/URLs autorizadas. Tener una herramienta no implica una fuente disponible. "
-                     "Use web.download o api.request con destination para datasets completos; web.fetch admite destination para texto. "
+                     "Use web.download o api.request con destination para datasets completos. web.fetch extrae texto plano, "
+                     "destination.path debe terminar en .txt; no guarda HTML original ni archivos .html. "
+                     "web.download usa filename CSV/JSON/XLSX y destination.path como carpeta, no como nombre de archivo. "
+                     "api.request guarda JSON con destination.path terminado en .json. "
                      "Entregue referencias resource_id/path, fuente, fecha, esquema, cobertura y resumen; no reproduzca datasets. "
                      "Una fuente disponible no garantiza las métricas pedidas. Si faltan partidos o campos, informe el bloqueo y no rellene datos.")
     return f"""Eres {agent.name}. Rol: {agent.role}. Objetivo: {agent.goal}.

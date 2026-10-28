@@ -282,7 +282,8 @@ def web_tool(session, task, agent, kind, args):
     if kind == "web.fetch" and args.get("destination"):
         destination = args["destination"]
         if not destination["path"].lower().endswith(".txt"):
-            raise ValueError("web.fetch guarda texto como .txt; datasets CSV/JSON/XLSX usan web.download")
+            raise ValueError("web.fetch extrae texto plano: guarde la página como .txt, no como .html. "
+                             "Los datasets CSV/JSON/XLSX se descargan con web.download")
         target = resource_path(session, agent, destination["resource_id"], destination["path"], "create")
         if target.exists():
             raise ValueError("Salida web existente; use otro nombre para evitar repetir la consulta")

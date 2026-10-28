@@ -2,6 +2,8 @@ from app.tools.builtins import RESOURCE, TEXT, schema
 
 PARAMETERS = {"type": "object", "maxProperties": 100, "additionalProperties": {"type": ["string", "number", "boolean", "null"]}}
 SOURCE = schema(RESOURCE, ["resource_id", "path"])
+FETCH_DESTINATION = schema({**RESOURCE, 'path': {'type': 'string', 'minLength': 1, 'maxLength': 1000,
+                                               'pattern': r'\.[tT][xX][tT]$'}}, ['resource_id', 'path'])
 TOOLS = [
     ("sports.analyze", "Analizar CSV deportivo real por grupo: totales, media y Poisson(0). Operación fija sin código IA", "sports.analyze",
      schema({**RESOURCE, "group_column": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -14,9 +16,9 @@ TOOLS = [
              "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
              "language": {"type": "string", "pattern": "^[a-z]{2}(-[a-z]{2})?$"},
              "date_range": {"type": "string", "pattern": "^(pd|pw|pm|py|[0-9]{4}-[0-9]{2}-[0-9]{2}to[0-9]{4}-[0-9]{2}-[0-9]{2})$"}}, ["query"]), ["internet.access"]),
-    ("web.fetch", "Leer URL pública asignada, con SSRF y redirecciones validadas", "web.fetch",
+    ("web.fetch", "Leer página pública autorizada y extraer texto plano; destination.path solo .txt, nunca HTML original", "web.fetch",
      schema({"url": TEXT, "timeout": {"type": "integer", "minimum": 1, "maximum": 60},
-             "destination": SOURCE}, ["url"]), ["internet.access"]),
+             "destination": FETCH_DESTINATION}, ["url"]), ["internet.access"]),
     ("web.download", "Descargar dataset autorizado CSV/JSON/XLSX de hasta 10 MB", "web.download",
      schema({"url": TEXT, "destination": schema(RESOURCE, ["resource_id"]), "filename": TEXT}, ["url", "destination"]), ["internet.access"]),
     ("api.request", "API configurada. Escritura o destino privado exige aprobación independiente", "api.request",

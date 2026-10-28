@@ -176,7 +176,7 @@ def register_builtins(session: Session):
             )
         elif existing.builtin:
             existing.parameters = parameters
-            if name == "python.execute":
+            if name in {"python.execute", "web.fetch"}:
                 existing.description = description
             existing.config = {**existing.config, "risk": risk}
     session.commit()

@@ -223,6 +223,15 @@ def execute_tool(session: Session, task: Task, agent: Agent, name: str, args: di
     audit(session, 'tool.started', {'name': name}, task.id, agent.id)
     error_category = None
     try:
+        if tool.kind == 'web.fetch' and isinstance(args.get('destination'), dict):
+            path = args['destination'].get('path', '')
+            if isinstance(path, str) and not path.lower().endswith('.txt'):
+                raise ToolArgumentsError(
+                    'web.fetch extrae texto plano de una página y destination.path debe terminar en .txt. '
+                    'No guarda HTML original: cambia .html/.htm por .txt si necesitas leer la página. '
+                    'Para un dataset CSV/JSON/XLSX usa web.download con filename y destination como carpeta; '
+                    'para las API configuradas usa api.request con destination.path terminado en .json.'
+                )
         if tool.kind == "excel.create" and "format" in args:
             raise ToolArgumentsError(
                 "excel.create crea archivos .xlsx y no acepta el parámetro format. "
