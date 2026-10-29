@@ -25,6 +25,16 @@ OPERATIONS = {
         "columns": {"type": "object", "minProperties": 1, "maxProperties": 30,
                     "propertyNames": {"type": "string", "minLength": 1, "maxLength": 200},
                     "additionalProperties": TEXT}}, ["resource_id", "path", "rows", "columns", "output_path"]),
+    # League title odds from a standings CSV and a pending-fixtures CSV in the same resource.
+    "poisson.simulate": object_schema({
+        "resource_id": TEXT, "table_path": TEXT, "pending_path": TEXT,
+        "table_columns": object_schema({key: TEXT for key in ("team", "played", "points", "goals_for", "goals_against")},
+                                       ["team", "played", "points", "goals_for", "goals_against"]),
+        "pending_columns": object_schema({"home": TEXT, "away": TEXT}, ["home", "away"]),
+        "simulations": {"type": "integer", "minimum": 1000, "maximum": 20000},
+        "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "home_advantage": {"type": "number", "minimum": 0.5, "maximum": 2.0},
+    }, ["resource_id", "table_path", "pending_path", "table_columns", "pending_columns"]),
 }
 PYTHON_SCHEMA = {"oneOf": [object_schema({"code": {"type": "string", "maxLength": 2000000},
     "resources": {"type": "array", "items": TEXT, "uniqueItems": True}}, ["code", "resources"]), *[

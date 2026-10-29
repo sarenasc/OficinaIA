@@ -129,3 +129,50 @@ def test_json_operations_respect_resources_and_file_types(client, tmp_path, nati
                      "resource_id": resource["id"], "path": "data.json", **table, **change}})
         assert denied["status"] == "error" and expected in denied["error"], denied
     assert not (tmp_path / "out.xlsx").exists()
+
+
+TABLE = "equipo,PJ,Pts,GF,GC\nA,10,25,20,8\nB,10,24,18,9\nC,10,10,8,20\nD,10,3,5,24\n"
+SIMULATION = {"table_path": "tabla.csv", "pending_path": "pendientes.csv", "simulations": 2000, "seed": 7,
+              "table_columns": {"team": "equipo", "played": "PJ", "points": "Pts", "goals_for": "GF",
+                                "goals_against": "GC"},
+              "pending_columns": {"home": "local", "away": "visitante"}}
+
+
+def test_poisson_simulation_is_reproducible_and_respects_math(client, tmp_path, native):
+    office, agent, resource = setup(client, tmp_path)
+    client.put("/api/execution/preference", json={"mode": "native"})
+    (tmp_path / "tabla.csv").write_text(TABLE, encoding="utf-8")
+    # A and B both have two matches left, including their direct meeting.
+    # A,B is listed twice, as it would be in both teams' calendars.
+    (tmp_path / "pendientes.csv").write_text("local,visitante\nA,B\nB,C\nD,A\nA,B\n", encoding="utf-8")
+    args = {"operation": "poisson.simulate", "parameters": {"resource_id": resource["id"], **SIMULATION}}
+    first, second = (run(client, office, agent, "python.execute", args) for _ in range(2))
+    assert first["status"] == "completed", first
+    result = json.loads(first["result"])
+    assert result["results"] == json.loads(second["result"])["results"] and result["backend"] == "native"
+    odds = {row["team"]: row for row in result["results"]}
+    assert abs(sum(row["champion_probability"] for row in result["results"]) - 1) < 0.001
+    # D can reach at most 6 points and C at most 16; neither can catch A's current 25.
+    assert odds["D"]["champion_probability"] == odds["C"]["champion_probability"] == 0
+    assert odds["A"]["max_points"] == 31 and odds["A"]["pending_matches"] == 2
+    assert odds["A"]["champion_probability"] > odds["B"]["champion_probability"] > 0
+    assert result["teams_without_pending"] == [] and result["duplicate_fixtures_removed"] == 1
+
+
+def test_poisson_simulation_rejects_bad_inputs(client, tmp_path, native):
+    office, agent, resource = setup(client, tmp_path)
+    client.put("/api/execution/preference", json={"mode": "native"})
+    (tmp_path / "tabla.csv").write_text(TABLE, encoding="utf-8")
+    (tmp_path / "pendientes.csv").write_text("local,visitante\nA,Z\n", encoding="utf-8")
+    (tmp_path / "tabla.json").write_text("{}", encoding="utf-8")
+    params = {"resource_id": resource["id"], **SIMULATION}
+    for change, expected in (({}, "no están en la tabla"), ({"table_path": "tabla.json"}, "CSV"),
+                             ({"pending_path": "../x.csv"}, "escap"),
+                             ({"table_columns": {**SIMULATION["table_columns"], "points": "Puntos"}}, "Columnas")):
+        task = run(client, office, agent, "python.execute", {"operation": "poisson.simulate",
+                                                             "parameters": {**params, **change}})
+        assert task["status"] == "error" and expected in task["error"], task
+        assert "Traceback" not in task["error"]
+    task = run(client, office, agent, "python.execute", {"operation": "poisson.simulate",
+                                                         "parameters": {**params, "simulations": 999999}})
+    assert task["status"] == "error" and "Argumentos inválidos" in task["error"], task

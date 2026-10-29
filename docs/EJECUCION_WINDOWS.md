@@ -67,6 +67,24 @@ Tabla completa como CSV; el modelo recibe solo cantidad de filas, columnas y tre
 
 Límites: hasta 10000 filas, 30 columnas y 600 KB de CSV. Los textos que empiezan con `=`, `+`, `-` o `@` se neutralizan para Excel. En modo SAFE, sobrescribir un CSV existente pide aprobación.
 
+### Probabilidad de campeonato: poisson.simulate
+
+Simula los partidos pendientes de una liga sin Docker y sin código libre. Recibe dos CSV del mismo recurso (permiso read): la tabla de posiciones y los partidos pendientes. Los nombres de equipo deben coincidir en ambos archivos.
+
+```json
+{"operation":"poisson.simulate","parameters":{"resource_id":"UUID","table_path":"tabla.csv","pending_path":"pendientes.csv","table_columns":{"team":"equipo","played":"PJ","points":"Pts","goals_for":"GF","goals_against":"GC"},"pending_columns":{"home":"local","away":"visitante"},"simulations":10000,"seed":2026}}
+```
+
+Modelo:
+- Fuerza de ataque y defensa de cada equipo = sus goles a favor y en contra por partido, divididos por el promedio de goles por equipo y partido de la tabla.
+- Goles esperados de cada partido = promedio × ataque propio × defensa rival; el local se multiplica por `home_advantage` (opcional, 0.5–2.0, por defecto 1.0, sin ventaja).
+- Cada partido se sortea con distribución de Poisson. El campeón se decide por puntos, diferencia de gol y goles a favor; un empate completo reparte el título.
+- `simulations` va de 1000 a 20000 (por defecto 10000). La semilla `seed` (por defecto 2026) hace que el resultado sea reproducible.
+
+Devuelve, por equipo: puntos actuales, partidos pendientes, puntos máximos, puntos esperados y probabilidad de campeonato. Los partidos repetidos (un cruce directo listado en los calendarios de ambos equipos) se cuentan una vez y se informan en `duplicate_fixtures_removed`. Un equipo sin partidos pendientes en el archivo conserva sus puntos actuales y aparece en `teams_without_pending`.
+
+Limitaciones: no considera lesiones, rotaciones, forma reciente ni reglas especiales del torneo (playoffs, liguillas, descuentos de puntos posteriores). Es una estimación, no una predicción garantizada.
+
 ```json
 {"operation":"sports.group","parameters":{"resource_id":"UUID","path":"partidos.csv","group_column":"equipo","value_column":"goles"}}
 ```

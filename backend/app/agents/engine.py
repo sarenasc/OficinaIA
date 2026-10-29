@@ -101,6 +101,8 @@ def instructions(session: Session, agent: Agent) -> str:
                      "reciben sus campos dentro de parameters. JSON grande: json.keys (resource_id, path, at) muestra su estructura; "
                      "json.table (resource_id, path, rows, columns {columna: ruta}, output_path .csv) lo guarda como CSV completo. "
                      "Rutas con puntos, índices y clave[campo=valor], p. ej. stats[name=points].value. "
+                     "poisson.simulate (resource_id, table_path y pending_path .csv, table_columns {team, played, points, "
+                     "goals_for, goals_against}, pending_columns {home, away}) calcula la probabilidad de campeonato. "
                      "No mezcle operation/parameters con code/resources; código libre exige Docker.")
     if any(name.startswith("web.") or name == "api.request" for name in names):
         hints.append("Primero compruebe conexiones/URLs autorizadas. Tener una herramienta no implica una fuente disponible. "

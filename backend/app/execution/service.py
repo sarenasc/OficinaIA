@@ -88,6 +88,19 @@ def fixed_parameters(session, agent, arguments, temp=None):
             staged = temp / ("input" + suffix)
             staged.write_bytes(content)
             parameters["path"] = str(staged)
+    elif name == "poisson.simulate":
+        resource_id = parameters.pop("resource_id")
+        resources = [resource_id]
+        for key in ("table_path", "pending_path"):
+            original = resource_path(session, agent, resource_id, parameters[key], "read")
+            if original.suffix.lower() != ".csv" or original.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("La simulación requiere CSV autorizados de hasta 2 MB")
+            if temp is None:
+                parameters[key] = "/workspace/" + resource_id + "/" + parameters[key].replace("\\", "/")
+            else:
+                staged = temp / (key + ".csv")
+                staged.write_bytes(original.read_bytes())
+                parameters[key] = str(staged)
     elif name == "csv.create":
         if not parameters["path"].lower().endswith(".csv"):
             raise ValueError("El archivo debe tener extensión .csv")
@@ -182,7 +195,7 @@ class WindowsExecutionBackend(ExecutionBackend):
                     out.seek(0)
                     err.seek(0)
                     if process.returncode:
-                        raise ValueError("Operación deportiva falló: " + err.read(4000).decode("utf-8", errors="replace"))
+                        raise ValueError("La operación falló: " + err.read(4000).decode("utf-8", errors="replace"))
                     result = json.loads(out.read(1024 * 1024))
                     result["worker_pid"] = process.pid
                     return result
