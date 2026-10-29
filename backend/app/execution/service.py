@@ -127,7 +127,8 @@ class WindowsExecutionBackend(ExecutionBackend):
             raise PermissionError("Windows nativo bloquea Python arbitrario. Seleccione Docker para python.execute")
         if sys.platform != "win32" or not native_python().is_file():
             raise ValueError("Trabajador Windows no preparado; ejecute scripts/setup_native_worker.py")
-        with TemporaryDirectory(prefix="office-native-") as directory:
+        # A locked leftover must never replace the timeout/cancel/result outcome.
+        with TemporaryDirectory(prefix="office-native-", ignore_cleanup_errors=True) as directory:
             temp = Path(directory)
             if operation == "python.packages":
                 argument = "--diagnostic"
@@ -186,6 +187,21 @@ class WindowsExecutionBackend(ExecutionBackend):
                     process.kill()
                 if process:
                     process.wait(timeout=5)
+                release_outputs(temp)
+
+
+def release_outputs(directory: Path):
+    """Windows can release a killed worker's output handles shortly after its job empties."""
+    deadline = time.monotonic() + 2
+    for name in ("err", "out"):
+        while True:
+            try:
+                (directory / name).unlink(missing_ok=True)
+                break
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
 
 
 def execute(session, task, agent, operation, arguments, timeout):
