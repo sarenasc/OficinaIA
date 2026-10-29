@@ -217,6 +217,21 @@ def test_secrets_never_in_generic_config(client):
     )
 
 
+@pytest.mark.parametrize("pricing", [
+    {"input_usd_per_million": 2, "output_usd_per_million": 10},
+    {"claude-opus-5-5": {"input": 5}},
+    {"claude-opus-5-5": {"input": "5", "output": 25}},
+    {"claude-opus-5-5": {"input": -1, "output": 25}},
+])
+def test_provider_pricing_must_be_per_model(client, pricing):
+    provider = {"name": "P", "kind": "anthropic", "url": "https://api.anthropic.com/v1"}
+    response = client.post("/api/providers", json={**provider, "pricing": pricing})
+    assert response.status_code == 422
+    assert "nombre-del-modelo" in response.json()["detail"]
+    valid = {"claude-opus-5-5": {"input": 5, "output": 25.5}}
+    assert client.post("/api/providers", json={**provider, "pricing": valid}).json()["pricing"] == valid
+
+
 def test_formula_injection_is_text(tmp_path):
     from app.tools.data import write_excel
 

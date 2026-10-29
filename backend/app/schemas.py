@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Input(BaseModel):
@@ -51,6 +51,18 @@ class ProviderInput(Input):
     default_model: str = ""
     active: bool = True
     pricing: dict = Field(default_factory=dict)
+
+    @field_validator("pricing")
+    @classmethod
+    def model_prices(cls, value: dict) -> dict:
+        # The engine looks prices up by the exact model name; any other shape would silently cost $0.
+        for model, price in value.items():
+            if (not model.strip() or not isinstance(price, dict) or set(price) != {"input", "output"}
+                    or any(isinstance(price[k], bool) or not isinstance(price[k], (int, float)) or not 0 <= price[k] < 10000
+                           for k in ("input", "output"))):
+                raise ValueError('Precios por modelo: {"nombre-del-modelo": {"input": 1, "output": 2}}, '
+                                 'en USD por millón de tokens y sin otras claves')
+        return value
 
 
 class ToolInput(Input):
