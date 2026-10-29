@@ -66,11 +66,17 @@ def fixed_parameters(session, agent, arguments, temp=None):
     parameters = dict(arguments["parameters"])
     validate_operation(name, parameters)
     resources = []
-    if name in {"csv.read", "sports.group"}:
+    if name in {"csv.read", "sports.group", "json.keys", "json.table"}:
+        suffix = ".json" if name.startswith("json.") else ".csv"
         resource_id = parameters.pop("resource_id")
+        if name == "json.table":
+            output = parameters.pop("output_path")
+            if not output.lower().endswith(".csv"):
+                raise ValueError("output_path debe terminar en .csv")
+            resource_path(session, agent, resource_id, output, "create")
         original = resource_path(session, agent, resource_id, parameters["path"], "read")
-        if original.suffix.lower() != ".csv" or original.stat().st_size > 20 * 1024 * 1024:
-            raise ValueError("La operación requiere CSV autorizado de hasta 20 MB")
+        if original.suffix.lower() != suffix or original.stat().st_size > 20 * 1024 * 1024:
+            raise ValueError(f"La operación requiere un archivo {suffix} autorizado de hasta 20 MB")
         resources = [resource_id]
         if temp is None:
             parameters["path"] = "/workspace/" + resource_id + "/" + parameters["path"].replace("\\", "/")
@@ -78,8 +84,8 @@ def fixed_parameters(session, agent, arguments, temp=None):
             with original.open("rb") as source:
                 content = source.read(20 * 1024 * 1024 + 1)
             if len(content) > 20 * 1024 * 1024:
-                raise ValueError("CSV excede 20 MB")
-            staged = temp / "input.csv"
+                raise ValueError("El archivo excede 20 MB")
+            staged = temp / ("input" + suffix)
             staged.write_bytes(content)
             parameters["path"] = str(staged)
     elif name == "csv.create":
@@ -252,6 +258,10 @@ def execute(session, task, agent, operation, arguments, timeout):
             parameters = arguments["parameters"]
             result["artifact"] = publish_bytes(session, task, agent, parameters["resource_id"], parameters["path"],
                                                result.pop("content").encode("utf-8"), "python.execute/csv.create")
+        if parameterized and arguments["operation"] == "json.table":
+            parameters = arguments["parameters"]
+            result["artifact"] = publish_bytes(session, task, agent, parameters["resource_id"], parameters["output_path"],
+                                               result.pop("content").encode("utf-8"), "python.execute/json.table")
         if operation == "sports.analyze" and "output_path" in arguments:
             result["artifact"] = publish_bytes(session, task, agent, arguments["resource_id"], arguments["output_path"],
                                                json.dumps(result, ensure_ascii=False).encode("utf-8"), operation)

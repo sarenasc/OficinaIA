@@ -47,6 +47,26 @@ Otras operaciones, reemplazando el UUID por un recurso asignado:
 {"operation":"csv.read","parameters":{"resource_id":"UUID","path":"partidos.csv"}}
 ```
 
+### JSON grandes: json.keys y json.table
+
+Un JSON descargado con api.request o web.download puede ser demasiado grande para mostrarlo al modelo. Estas operaciones lo procesan en el trabajador sin código libre. Ambas exigen permiso read sobre un archivo `.json` de hasta 20 MB; json.table exige además create sobre la salida `.csv` del mismo recurso.
+
+Las rutas usan puntos para claves e índices de lista, y `clave[campo=valor]` para elegir el primer elemento de una lista cuyo campo coincide. Una ruta inexistente deja la celda vacía y se informa en `empty_cells`.
+
+Estructura sin datos (claves, tipos y tamaños):
+
+```json
+{"operation":"json.keys","parameters":{"resource_id":"UUID","path":"posiciones.json","at":"children.0.standings.entries"}}
+```
+
+Tabla completa como CSV; el modelo recibe solo cantidad de filas, columnas y tres filas de muestra:
+
+```json
+{"operation":"json.table","parameters":{"resource_id":"UUID","path":"posiciones.json","rows":"children.0.standings.entries","output_path":"posiciones.csv","columns":{"equipo":"team.displayName","pj":"stats[name=gamesPlayed].value","pts":"stats[name=points].value"}}}
+```
+
+Límites: hasta 10000 filas, 30 columnas y 600 KB de CSV. Los textos que empiezan con `=`, `+`, `-` o `@` se neutralizan para Excel. En modo SAFE, sobrescribir un CSV existente pide aprobación.
+
 ```json
 {"operation":"sports.group","parameters":{"resource_id":"UUID","path":"partidos.csv","group_column":"equipo","value_column":"goles"}}
 ```

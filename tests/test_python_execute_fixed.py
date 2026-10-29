@@ -78,3 +78,54 @@ def test_csv_modify_requires_approval_and_preserves_formula_safety(client, tmp_p
     task = approve(client, task)
     assert task["status"] == "completed", task
     assert "'=1+1" in file.read_text(encoding="utf-8")
+
+
+STANDINGS = {"children": [{"standings": {"entries": [
+    {"team": {"displayName": "Colo Colo"}, "stats": [{"name": "points", "value": 55}, {"name": "gamesPlayed", "value": 25}]},
+    {"team": {"displayName": "=HYPERLINK(\"x\")"}, "stats": [{"name": "points", "value": 40}]},
+]}}]}
+
+
+def test_json_keys_and_table_extract_nested_data_without_code(client, tmp_path, native):
+    office, agent, resource = setup(client, tmp_path)
+    client.put("/api/execution/preference", json={"mode": "native"})
+    (tmp_path / "standings.json").write_text(json.dumps(STANDINGS), encoding="utf-8")
+    params = {"resource_id": resource["id"], "path": "standings.json"}
+    keys = run(client, office, agent, "python.execute", {"operation": "json.keys", "parameters": {
+               **params, "at": "children.0.standings.entries"}})
+    assert keys["status"] == "completed", keys
+    shape = json.loads(keys["result"])
+    assert shape["type"] == "list" and shape["size"] == 2 and shape["keys"]["stats"] == {"type": "list", "size": 2}
+    table = run(client, office, agent, "python.execute", {"operation": "json.table", "parameters": {
+                **params, "rows": "children.0.standings.entries", "output_path": "posiciones.csv",
+                "columns": {"equipo": "team.displayName", "puntos": "stats[name=points].value",
+                            "pj": "stats[name=gamesPlayed].value"}}})
+    assert table["status"] == "completed", table
+    result = json.loads(table["result"])
+    assert result["row_count"] == 2 and result["empty_cells"] == {"pj": 1} and "content" not in result
+    assert result["artifact"]["verified"] and result["backend"] == "native"
+    lines = (tmp_path / "posiciones.csv").read_text(encoding="utf-8").splitlines()
+    assert lines[:2] == ["equipo,puntos,pj", "Colo Colo,55,25"]
+    assert lines[2].startswith("\"'=HYPERLINK")
+
+
+def test_json_operations_respect_resources_and_file_types(client, tmp_path, native):
+    office, agent, resource = setup(client, tmp_path)
+    client.put("/api/execution/preference", json={"mode": "native"})
+    (tmp_path / "data.json").write_text(json.dumps(STANDINGS), encoding="utf-8")
+    (tmp_path / "data.csv").write_text("a\n1\n", encoding="utf-8")
+    table = {"rows": "children", "columns": {"a": "standings"}, "output_path": "out.csv"}
+    for params, expected in (
+        ({"resource_id": resource["id"], "path": "../data.json"}, "escap"),
+        ({"resource_id": "not-assigned", "path": "data.json"}, "asignado"),
+        ({"resource_id": resource["id"], "path": "data.csv"}, ".json"),
+        ({"resource_id": resource["id"], "path": "data.json", "at": "missing.key"}, "no existe"),
+    ):
+        denied = run(client, office, agent, "python.execute", {"operation": "json.keys", "parameters": params})
+        assert denied["status"] == "error" and expected in denied["error"], denied
+    for change, expected in (({"output_path": "out.xlsx"}, ".csv"), ({"output_path": "../out.csv"}, "escap"),
+                             ({"rows": "children.0"}, "lista")):
+        denied = run(client, office, agent, "python.execute", {"operation": "json.table", "parameters": {
+                     "resource_id": resource["id"], "path": "data.json", **table, **change}})
+        assert denied["status"] == "error" and expected in denied["error"], denied
+    assert not (tmp_path / "out.xlsx").exists()

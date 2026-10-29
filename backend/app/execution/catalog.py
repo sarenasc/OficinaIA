@@ -19,6 +19,12 @@ OPERATIONS = {
         "items": {"type": "object", "minProperties": 1, "maxProperties": 30,
                   "propertyNames": {"type": "string", "minLength": 1, "maxLength": 200},
                   "additionalProperties": SCALAR}}}, ["resource_id", "path", "rows"]),
+    # Dot paths: key, list index or key[field=value]; e.g. children.0.standings.entries
+    "json.keys": object_schema({**FILE, "at": {"type": "string", "maxLength": 1000}}, ["resource_id", "path"]),
+    "json.table": object_schema({**FILE, "rows": {"type": "string", "maxLength": 1000}, "output_path": TEXT,
+        "columns": {"type": "object", "minProperties": 1, "maxProperties": 30,
+                    "propertyNames": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "additionalProperties": TEXT}}, ["resource_id", "path", "rows", "columns", "output_path"]),
 }
 PYTHON_SCHEMA = {"oneOf": [object_schema({"code": {"type": "string", "maxLength": 2000000},
     "resources": {"type": "array", "items": TEXT, "uniqueItems": True}}, ["code", "resources"]), *[

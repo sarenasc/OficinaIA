@@ -40,10 +40,82 @@ def analyze(path, group_column, value_column):
             "notice": "Poisson(0) es una estimación con media observada; no predice resultados garantizados."}
 
 
+def resolve(value, path):
+    """Follow key, list index and key[field=value] segments; returns None when a step is missing."""
+    for segment in [part for part in (path or "").split(".") if part]:
+        selector = None
+        if segment.endswith("]") and "[" in segment:
+            segment, selector = segment[:-1].split("[", 1)
+            if "=" not in selector:
+                raise ValueError("Selector inválido; use clave[campo=valor]")
+        if segment:
+            if isinstance(value, dict):
+                value = value.get(segment)
+            elif isinstance(value, list) and segment.isdigit():
+                value = value[int(segment)] if int(segment) < len(value) else None
+            else:
+                return None
+        if selector is not None:
+            field, expected = selector.split("=", 1)
+            if not isinstance(value, list):
+                return None
+            value = next((item for item in value if isinstance(item, dict) and str(item.get(field)) == expected), None)
+    return value
+
+
+def describe(value):
+    if isinstance(value, dict):
+        return {"type": "object", "size": len(value)}
+    if isinstance(value, list):
+        return {"type": "list", "size": len(value)}
+    return {"type": type(value).__name__, "value": value if not isinstance(value, str) else value[:120]}
+
+
+def json_keys(path, at=""):
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    value = resolve(data, at)
+    if value is None:
+        raise ValueError("La ruta 'at' no existe en el JSON")
+    result = {"at": at, **describe(value)}
+    if isinstance(value, list) and value:
+        # Lists share a shape; describing the first element is enough to build a table.
+        value = value[0]
+        result["first_item"] = describe(value)
+    if isinstance(value, dict):
+        result["keys"] = {key: describe(item) for key, item in list(value.items())[:100]}
+    return result
+
+
+def json_table(path, rows, columns):
+    items = resolve(json.loads(Path(path).read_text(encoding="utf-8-sig")), rows)
+    if not isinstance(items, list) or not 1 <= len(items) <= 10000:
+        raise ValueError("'rows' debe apuntar a una lista de entre 1 y 10000 elementos")
+    table = []
+    for item in items:
+        row = {}
+        for name, column_path in columns.items():
+            cell = resolve(item, column_path)
+            row[name] = json.dumps(cell, ensure_ascii=False)[:2000] if isinstance(cell, (dict, list)) else cell
+        table.append(row)
+    missing = {name: sum(row[name] is None for row in table) for name in columns}
+    content = io.StringIO(newline="")
+    writer = csv.DictWriter(content, fieldnames=list(columns))
+    writer.writeheader()
+    for row in table:
+        writer.writerow({key: "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@"))
+                         else value for key, value in row.items()})
+    # The worker's whole reply is capped at 1 MB; leave room for JSON escaping.
+    if len(content.getvalue().encode()) > 600 * 1024:
+        raise ValueError("La tabla generada excede 600 KB; elija menos columnas o una lista más pequeña")
+    return {"row_count": len(table), "columns": list(columns), "sample": table[:3],
+            "empty_cells": {name: count for name, count in missing.items() if count}, "content": content.getvalue()}
+
+
 def main():
     if len(sys.argv) == 2 and sys.argv[1] == "--diagnostic":
         print(json.dumps({"python": sys.version.split()[0], "packages": {"stdlib": sys.version.split()[0]},
-                          "operations": ["sports.analyze", "statistics.mean", "sports.group", "csv.read", "csv.create"]}))
+                          "operations": ["sports.analyze", "statistics.mean", "sports.group", "csv.read", "csv.create",
+                                         "json.keys", "json.table"]}))
         return
     args = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     if set(args) == {"operation", "parameters"}:
@@ -107,6 +179,10 @@ def run_operation(operation, parameters):
         if len(json.dumps(result, ensure_ascii=True).encode()) > 512000:
             raise ValueError("CSV generado excede 512 KB de resultado")
         return result
+    if operation == "json.keys" and set(parameters) in ({"path"}, {"path", "at"}):
+        return {"operation": operation, **json_keys(**parameters)}
+    if operation == "json.table" and set(parameters) == {"path", "rows", "columns"}:
+        return {"operation": operation, **json_table(**parameters)}
     raise ValueError("Operación o parámetros no autorizados")
 
 

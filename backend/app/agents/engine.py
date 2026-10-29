@@ -98,7 +98,10 @@ def instructions(session: Session, agent: Agent) -> str:
     if "python.execute" in names:
         hints.append('python.execute: operation="statistics.mean", parameters={"values":[2,1,3,0,4]}. '
                      "Devuelve count,sum,mean,median,population_stddev reales. sports.group, csv.read y csv.create "
-                     "reciben sus campos dentro de parameters. No mezcle operation/parameters con code/resources; código libre exige Docker.")
+                     "reciben sus campos dentro de parameters. JSON grande: json.keys (resource_id, path, at) muestra su estructura; "
+                     "json.table (resource_id, path, rows, columns {columna: ruta}, output_path .csv) lo guarda como CSV completo. "
+                     "Rutas con puntos, índices y clave[campo=valor], p. ej. stats[name=points].value. "
+                     "No mezcle operation/parameters con code/resources; código libre exige Docker.")
     if any(name.startswith("web.") or name == "api.request" for name in names):
         hints.append("Primero compruebe conexiones/URLs autorizadas. Tener una herramienta no implica una fuente disponible. "
                      "Use web.download o api.request con destination para datasets completos. web.fetch extrae texto plano, "
