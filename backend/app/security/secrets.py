@@ -22,7 +22,10 @@ class SecretStore:
             return ""
         result = self._vault().get_password("OficinaIALocal", ref)
         if not result:
-            raise ValueError("Credencial no encontrada en Windows Credential Manager")
+            raise ValueError(
+                "Credencial no encontrada en Windows Credential Manager de este equipo. Las API keys se guardan "
+                "por equipo: vuelva a ingresar la clave del proveedor en Configuración en este computador"
+            )
         return result
 
     def delete(self, ref: str | None) -> None:

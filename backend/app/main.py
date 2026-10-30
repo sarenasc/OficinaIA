@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DatabaseError, IntegrityError
 
 from app.agents.engine import worker
 from app.api import router, ws_router
@@ -18,10 +18,23 @@ from app.core.db import SessionLocal, engine
 from app.core.runtime_log import close as close_log
 from app.core.runtime_log import configure as configure_log
 from app.core.runtime_log import logger
-from app.core.storage import prepare_sqlite, synced_folder
+from app.core.storage import backup_after_start, is_corruption, prepare_sqlite, restore, synced_folder
 from app.demo import router as demo_router
 from app.models import Base, Provider
 from app.tools.builtins import register_builtins
+
+
+def initialize_database():
+    if DATABASE_URL.startswith("sqlite"):
+        engine.dispose()
+        Base.metadata.create_all(engine)
+    with SessionLocal() as session:
+        if not session.scalar(select(Provider).where(Provider.kind == "ollama")):
+            session.add(Provider(name="Ollama local", kind="ollama", url=OLLAMA_URL))
+            session.commit()
+        register_builtins(session)
+        from app.execution.service import recover_jobs
+        recover_jobs(session)
 
 
 @asynccontextmanager
@@ -33,21 +46,28 @@ async def lifespan(app: FastAPI):
         if not TOKEN:
             raise RuntimeError("OFFICE_SESSION_TOKEN requerido. Utilice scripts/launch.py")
         if DATABASE_URL.startswith("sqlite"):
-            prepare_sqlite(Path(engine.url.database), DATA_DIR)
-            engine.dispose()
-            logger.info('Base de datos: %s', engine.url.database)
-            if synced_folder(Path(engine.url.database).parent):
+            database = Path(engine.url.database)
+            prepare_sqlite(database, DATA_DIR)
+            logger.info('Base de datos: %s', database)
+            if synced_folder(database.parent):
                 logger.warning('La base SQLite está en una carpeta sincronizada (OneDrive/Dropbox); '
                                'esto puede dañarla. Quite OFFICE_DATABASE_URL para usar la ubicación local.')
-            Base.metadata.create_all(engine)
-        with SessionLocal() as session:
-            if not session.scalar(select(Provider).where(Provider.kind == "ollama")):
-                session.add(Provider(name="Ollama local", kind="ollama", url=OLLAMA_URL))
-                session.commit()
-            register_builtins(session)
-            from app.execution.service import recover_jobs
-            recover_jobs(session)
-        await worker.start()
+            try:
+                initialize_database()
+                await worker.start()
+            except DatabaseError as exc:
+                # quick_check does not read every row; damage can surface on the first queries.
+                if not is_corruption(exc):
+                    raise
+                logger.error('La base falló al abrirse (%s). Restaurando el último backup sano.', type(exc).__name__)
+                engine.dispose()
+                restore(database, DATA_DIR)
+                initialize_database()
+                await worker.start()
+            backup_after_start(database, DATA_DIR)
+        else:
+            initialize_database()
+            await worker.start()
         started = True
         logger.info('Sistema listo. Esperando tareas; las consultas periódicas no se imprimen.')
         yield

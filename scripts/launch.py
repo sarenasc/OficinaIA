@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--token")
     parser.add_argument("--services", action="store_true")
     parser.add_argument("--user-data", action="store_true", help="Datos independientes del checkout en AppData Local")
+    parser.add_argument("--base-nueva", action="store_true",
+                        help="Empieza con una base SQLite vacía; la actual se conserva apartada, no se borra")
     args = parser.parse_args()
     from dotenv import load_dotenv
 
@@ -30,12 +32,18 @@ def main():
         data_root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "OficinaIA"
         data_root.mkdir(parents=True, exist_ok=True)
         env["OFFICE_DATA_DIR"] = str(data_root)
-    if args.local:
-        sys.path.insert(0, str(ROOT / "backend"))
-        from app.core.storage import database_path
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app.core.storage import database_path, reset
 
-        data_dir = (ROOT / env.get("OFFICE_DATA_DIR", "data")).resolve()
+    data_dir = (ROOT / env.get("OFFICE_DATA_DIR", "data")).resolve()
+    if args.local:
         env["OFFICE_DATABASE_URL"] = "sqlite:///" + str(database_path(data_dir))
+    if args.base_nueva:
+        url = env.get("OFFICE_DATABASE_URL") or "sqlite:///" + str(database_path(data_dir))
+        if not url.startswith("sqlite:///"):
+            raise RuntimeError("--base-nueva solo se aplica a SQLite")
+        kept = reset(Path(url.removeprefix("sqlite:///")))
+        print("Base nueva. " + (f"Base anterior apartada como {kept}" if kept else "No había base anterior."))
     if args.services:
         result = subprocess.run(["docker", "compose", "up", "-d", "--wait", "postgres", "redis"], env=env)
         if result.returncode:

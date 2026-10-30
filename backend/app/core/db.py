@@ -4,7 +4,9 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import DATABASE_URL
 
 engine = create_engine(
-    DATABASE_URL, **({"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {})
+    DATABASE_URL,
+    # timeout: wait for another writer instead of failing at once with "database is locked".
+    **({"connect_args": {"check_same_thread": False, "timeout": 30}} if DATABASE_URL.startswith("sqlite") else {}),
 )
 if DATABASE_URL.startswith("sqlite"):
 

@@ -20,10 +20,23 @@ por separado y, sobre todo entre dos equipos, deja la base dañada
 si está sana; el archivo original no se modifica. Cada equipo tiene su propia base:
 para llevar datos a otro equipo use un backup, no la carpeta sincronizada.
 
-En cada arranque se comprueba la integridad de la base y se guarda una copia en
-`data/backups/auto` (últimas 10). Si la base está dañada, se aparta como
-`office.db.danada-<fecha>` y se restaura el backup sano más reciente. No migra
-bases PostgreSQL. Si copias el EXE
+### Backups automáticos y recuperación
+
+En cada apertura se comprueba la integridad de la base. Cuando el sistema terminó de
+arrancar bien, se guarda un backup en `data/backups/auto/<NOMBRE-DEL-EQUIPO>`: se
+conservan las últimas 10 aperturas y el último backup de cada uno de los 14 días
+anteriores. Se guardan solo después de un arranque correcto, para no respaldar una base
+dañada. Se escriben con un nombre temporal y se renombran al terminar, así OneDrive
+nunca sincroniza un backup a medio escribir.
+
+Si la base está dañada (al revisarla o en las primeras consultas), se aparta como
+`office.db.danada-<fecha>` y se restaura el backup sano más reciente de este equipo;
+después, los backups manuales de `data/backups`. Los backups dañados se descartan.
+Si no hay ninguno sano, el sistema abre con una base vacía. Nunca se borra un archivo.
+
+Para empezar de cero, cierra Oficina IA y ejecuta `Base nueva Oficina IA.cmd`
+(o `"Oficina IA.exe" --base-nueva`). La base actual queda apartada como
+`office.db.reinicio-<fecha>`. No migra bases PostgreSQL. Si copias el EXE
 a una carpeta nueva, crea una oficina de datos nueva. La carpeta debe permitir
 escritura. No copies ni muevas bases de datos mientras el sistema esté abierto.
 El ejecutable no contiene datos, credenciales ni archivos `.env` del usuario.

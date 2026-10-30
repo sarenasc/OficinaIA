@@ -25,6 +25,8 @@ def main():
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--self-test', action='store_true', help='Prueba aislada; exige una carpeta nueva')
+    parser.add_argument('--base-nueva', action='store_true',
+                        help='Empieza con una base vacía; la actual se conserva apartada, no se borra')
     args = parser.parse_args()
     if args.self_test and (not args.data_dir or args.data_dir.exists()):
         raise ValueError('--self-test requiere --data-dir con una carpeta que no exista')
@@ -39,9 +41,13 @@ def main():
         os.environ['OFFICE_NATIVE_EXECUTABLE'] = sys.executable
     else:
         sys.path.insert(0, str(root / 'backend'))
-    from app.core.storage import database_path
+    from app.core.storage import database_path, reset
     # Outside OneDrive/Dropbox: synchronized SQLite files get corrupted.
     database = database_path(directory)
+    if args.base_nueva:
+        kept = reset(database)
+        print('Base nueva. ' + ('Base anterior apartada como ' + str(kept) if kept else 'No había base anterior.'),
+              flush=True)
     os.environ['OFFICE_DATABASE_URL'] = 'sqlite:///' + str(database)
     # Reserve-check before initializing the database or starting background jobs.
     with socket.socket() as probe:

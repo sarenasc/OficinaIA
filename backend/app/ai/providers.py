@@ -114,6 +114,23 @@ def validate_provider(provider: Provider, model: str = ""):
             )
 
 
+def provider_error_detail(response) -> str:
+    """'invalid_request_error: ...' from OpenAI/Anthropic/Gemini error bodies, bounded and redacted."""
+    from app.core.audit import redact
+
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return ""
+    if isinstance(error, dict):
+        kind = error.get("type") or error.get("status") or ""
+        message = error.get("message") or ""
+    else:
+        kind, message = "", error if isinstance(error, str) else ""
+    text = ": ".join(str(part) for part in (kind, message) if part)
+    return f" ({redact(text)[:300]})" if text else ""
+
+
 class HTTPProvider(AIProvider):
     async def complete(self, provider: Provider, agent: Agent, model: str, messages: list[dict]) -> AIResponse:
         validate_provider(provider, model)
@@ -193,8 +210,9 @@ class HTTPProvider(AIProvider):
             except httpx.RequestError as exc:
                 raise ModelCallError(f"La conexión con {provider.kind} se interrumpió ({type(exc).__name__})", "network", attempts) from exc
             if response.status_code >= 400:
-                # Do not leak error bodies, request headers or credential-bearing URLs.
-                raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}", "provider_http", attempts)
+                # Only the provider's own error type/message; never headers or credential-bearing URLs.
+                raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}"
+                                     + provider_error_detail(response), "provider_http", attempts)
             try:
                 data = response.json()
             except ValueError:
