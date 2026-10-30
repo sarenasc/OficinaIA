@@ -1,5 +1,6 @@
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,7 @@ from app.core.db import SessionLocal, engine
 from app.core.runtime_log import close as close_log
 from app.core.runtime_log import configure as configure_log
 from app.core.runtime_log import logger
+from app.core.storage import prepare_sqlite, synced_folder
 from app.demo import router as demo_router
 from app.models import Base, Provider
 from app.tools.builtins import register_builtins
@@ -31,6 +33,12 @@ async def lifespan(app: FastAPI):
         if not TOKEN:
             raise RuntimeError("OFFICE_SESSION_TOKEN requerido. Utilice scripts/launch.py")
         if DATABASE_URL.startswith("sqlite"):
+            prepare_sqlite(Path(engine.url.database), DATA_DIR)
+            engine.dispose()
+            logger.info('Base de datos: %s', engine.url.database)
+            if synced_folder(Path(engine.url.database).parent):
+                logger.warning('La base SQLite está en una carpeta sincronizada (OneDrive/Dropbox); '
+                               'esto puede dañarla. Quite OFFICE_DATABASE_URL para usar la ubicación local.')
             Base.metadata.create_all(engine)
         with SessionLocal() as session:
             if not session.scalar(select(Provider).where(Provider.kind == "ollama")):

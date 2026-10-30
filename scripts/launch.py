@@ -31,7 +31,11 @@ def main():
         data_root.mkdir(parents=True, exist_ok=True)
         env["OFFICE_DATA_DIR"] = str(data_root)
     if args.local:
-        env["OFFICE_DATABASE_URL"] = "sqlite:///" + str(Path(env.get("OFFICE_DATA_DIR", ROOT / "data")) / "office.db")
+        sys.path.insert(0, str(ROOT / "backend"))
+        from app.core.storage import database_path
+
+        data_dir = (ROOT / env.get("OFFICE_DATA_DIR", "data")).resolve()
+        env["OFFICE_DATABASE_URL"] = "sqlite:///" + str(database_path(data_dir))
     if args.services:
         result = subprocess.run(["docker", "compose", "up", "-d", "--wait", "postgres", "redis"], env=env)
         if result.returncode:

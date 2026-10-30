@@ -11,8 +11,19 @@ pulsa Ctrl+C en ella o ciérrala. Cerrar solamente la pestaña del navegador no
 detiene el backend. El puerto local 38080 debe estar libre: detén el otro lanzador
 antes de abrir este ejecutable.
 
-Los datos se guardan en `data`, junto al ejecutable. En la carpeta actual utiliza
-la misma base SQLite `data/office.db`; no migra bases PostgreSQL. Si copias el EXE
+Los datos se guardan en `data`, junto al ejecutable. La base SQLite es
+`data/office.db`, salvo que la carpeta esté en OneDrive, Dropbox u otra carpeta
+sincronizada: entonces la base vive en `%LOCALAPPDATA%\OficinaIA\bases\<id>\office.db`
+(la consola y el log muestran la ruta). OneDrive sincroniza `office.db`, `-wal` y `-shm`
+por separado y, sobre todo entre dos equipos, deja la base dañada
+(`database disk image is malformed`). La primera vez se copia la base anterior
+si está sana; el archivo original no se modifica. Cada equipo tiene su propia base:
+para llevar datos a otro equipo use un backup, no la carpeta sincronizada.
+
+En cada arranque se comprueba la integridad de la base y se guarda una copia en
+`data/backups/auto` (últimas 10). Si la base está dañada, se aparta como
+`office.db.danada-<fecha>` y se restaura el backup sano más reciente. No migra
+bases PostgreSQL. Si copias el EXE
 a una carpeta nueva, crea una oficina de datos nueva. La carpeta debe permitir
 escritura. No copies ni muevas bases de datos mientras el sistema esté abierto.
 El ejecutable no contiene datos, credenciales ni archivos `.env` del usuario.
