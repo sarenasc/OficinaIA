@@ -9,7 +9,7 @@ Actualizada el 7 de octubre de 2026. Prioridad acordada: Excel, después SQL Ser
 | excel.generate_sales | Excel ficticio de 1 a 10000 ventas, totales calculados y marcado como sintético | resource_id, path, count, seed opcional |
 | filesystem.list | Archivos y carpetas reales, sin recorrer subcarpetas ni seguir enlaces | resource_id, path opcional, limit opcional hasta 500 |
 | excel.from_csv | CSV convertido a Excel sin pasar todas las filas por el modelo | source_resource_id, source_path, resource_id, path, delimiter opcional |
-| sql.describe | Base activa, nombres de tablas y vistas, o columnas y tipos de una tabla o vista; no entrega registros | connection_id, table y schema opcionales |
+| sql.describe | Base activa, nombres de tablas y vistas, o columnas y tipos de una tabla o vista; con `columns: true` y sin `table`, todas las columnas y la cantidad de filas de las tablas (metadatos SQL Server; COUNT en SQLite) en una sola llamada; no entrega registros | connection_id; table, schema y columns opcionales |
 | sql.export_excel | SELECT, agregaciones y reporte Excel sin copiar filas al contexto de la IA | connection_id, query, resource_id, path |
 | social.prepare_post | Borrador JSON local para LinkedIn, Facebook o Instagram; no publica | resource_id, path terminado en .json, platform, text |
 
@@ -43,7 +43,7 @@ Este procedimiento evita una llamada a Ollama: genera los datos y el archivo dir
 Flujo disponible con conexión autorizada:
 
 1. Configurar SQL Server con driver ODBC y credencial o autenticación Windows.
-2. Asignar conexión con connect/select y herramientas sql.describe, sql.query y sql.export_excel. `sql.query` admite `DB_NAME()`, `SCHEMA_NAME()` y `current_database()` para conocer la base activa.
+2. Asignar conexión con connect/select y herramientas sql.describe, sql.query y sql.export_excel. `sql.query` admite las funciones de lectura de `SAFE_SQL_FUNCTIONS` en `backend/app/tools/connections.py` (CASE, IIF, fechas, textos, agregados, ventanas y nombres de la base activa); `tests/test_sql_functions.py` contiene las consultas de referencia por motor.
 3. Consultar tablas y columnas reales, evitando inventar nombres.
 4. Calcular agrupaciones y métricas en SQL. Para decidir, definir objetivo, periodo, umbrales, datos suficientes y acciones permitidas.
 5. Enviar al modelo resultados agregados pequeños para explicar una recomendación.

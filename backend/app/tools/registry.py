@@ -199,7 +199,8 @@ def dispatch(session: Session, task: Task, agent: Agent, tool: Tool, args: dict)
     if kind == "python.execute":
         return execute_backend(session, task, agent, kind, args, tool.timeout)
     if kind == "sql.describe":
-        return describe_connection(session, agent, args["connection_id"], args.get("table"), args.get("schema"))
+        return describe_connection(session, agent, args["connection_id"], args.get("table"), args.get("schema"),
+                                   bool(args.get("columns")))
     if kind == "sql.query":
         return query_readonly(session, agent, args["connection_id"], args["query"], args.get("parameters"), args.get("max_rows", 10000))
     if kind == "custom.sql":

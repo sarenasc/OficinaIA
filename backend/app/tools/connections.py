@@ -5,6 +5,7 @@ import time
 import sqlglot
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlglot import exp
 
@@ -93,6 +94,43 @@ def connection_engine(connection: Connection, writable: bool = False):
     return create_engine(url, pool_pre_ping=True, hide_parameters=True)
 
 
+# sqlglot models much syntax as functions with its own canonical names: CASE, IIF -> IF,
+# DATEPART -> EXTRACT, LEN -> LENGTH, CHARINDEX -> STR_POSITION, GETDATE -> CURRENT_TIMESTAMP,
+# DATENAME/FORMAT -> TIME_TO_STR... tests/test_sql_functions.py keeps a corpus per dialect.
+# Everything here is deterministic, read-only and local to the query. Never add procedures,
+# OPENQUERY/OPENROWSET/OPENDATASOURCE, file, network, sleep or set-generating functions.
+SAFE_SQL_FUNCTIONS = frozenset({
+    # Conditional and nulls
+    "CASE", "IF", "COALESCE", "NULLIF", "GREATEST", "LEAST", "CHOOSE", "EXISTS", "COLLATE",
+    # Aggregates and statistics
+    "COUNT", "SUM", "AVG", "MIN", "MAX", "STDDEV", "STDDEV_POP", "STDDEV_SAMP", "VARIANCE", "VARIANCE_POP",
+    "STDEV", "STDEVP", "VAR", "VARP", "TOTAL", "APPROX_DISTINCT", "GROUPING", "GROUP_CONCAT", "STRING_AGG",
+    "ARRAY_AGG", "LOGICAL_OR", "LOGICAL_AND", "PERCENTILE_CONT", "PERCENTILE_DISC", "MEDIAN",
+    # Window functions
+    "ROW_NUMBER", "RANK", "DENSE_RANK", "NTILE", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
+    "CUME_DIST", "PERCENT_RANK",
+    # Numbers
+    "ROUND", "ABS", "CEIL", "FLOOR", "POWER", "SQRT", "SIGN", "MOD", "LN", "LOG", "LOG10", "EXP", "PI",
+    "SQUARE", "TRUNC", "NUMBER_TO_STR", "STR",
+    # Types
+    "CAST", "TRY_CAST", "CONVERT", "TRY_CONVERT", "PARSE", "TRY_PARSE", "ISNUMERIC", "ISDATE", "TYPEOF",
+    # Text
+    "LENGTH", "UPPER", "LOWER", "TRIM", "SUBSTRING", "LEFT", "RIGHT", "REPLACE", "CONCAT", "CONCAT_WS",
+    "STR_POSITION", "PATINDEX", "SPLIT_PART", "REVERSE", "REPEAT", "SPACE", "STUFF", "TRANSLATE", "ASCII",
+    "UNICODE", "CHR", "NCHAR", "QUOTENAME", "PRINTF", "FORMAT",
+    # Dates
+    "DATE", "DATETIME", "YEAR", "MONTH", "DAY", "QUARTER", "WEEK", "WEEK_OF_YEAR", "DAY_OF_WEEK",
+    "DAY_OF_MONTH", "DAY_OF_YEAR", "EXTRACT", "DATE_TRUNC", "TIMESTAMP_TRUNC", "DATETRUNC", "DATE_ADD",
+    "DATE_SUB", "DATEDIFF", "DATE_DIFF", "TIMESTAMPDIFF", "TIMESTAMP_DIFF", "LAST_DAY", "DATE_FROM_PARTS",
+    "TIMESTAMP_FROM_PARTS", "MAKE_DATE", "TIME_TO_STR", "STR_TO_DATE", "STR_TO_TIME", "TIME_STR_TO_TIME",
+    "TS_OR_DS_TO_DATE", "TS_OR_DS_TO_TIMESTAMP", "JULIANDAY", "AGE", "CURRENT_TIMESTAMP",
+    "CURRENT_TIMESTAMP_L_T_Z", "CURRENT_DATE", "CURRENT_TIME", "NOW", "GETUTCDATE",
+    # Metadata of the active database and login (names only)
+    "DB_NAME", "CURRENT_DATABASE", "CURRENT_SCHEMA", "CURRENT_USER", "USER_NAME", "SUSER_SNAME",
+    "OBJECT_ID", "OBJECT_NAME", "OBJECT_SCHEMA_NAME", "COL_NAME", "TYPE_NAME", "HAS_PERMS_BY_NAME",
+})
+
+
 def validate_select(query: str, kind: str):
     dialect = {"sqlserver": "tsql", "postgresql": "postgres", "mysql": "mysql", "sqlite": "sqlite"}[kind]
     statements = sqlglot.parse(query, read=dialect)
@@ -102,36 +140,12 @@ def validate_select(query: str, kind: str):
     forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Create, exp.Drop, exp.Command, exp.Into, exp.Merge, exp.Copy)
     if any(isinstance(node, forbidden) for node in tree.walk()):
         raise PermissionError("Consulta contiene operaciones no autorizadas")
-    # Functions can execute arbitrary server code; use a conservative allowlist.
-    allowed = {
-        "COUNT",
-        "SUM",
-        "AVG",
-        "MIN",
-        "MAX",
-        "COALESCE",
-        "UPPER",
-        "LOWER",
-        "ROUND",
-        "ABS",
-        "LENGTH",
-        "DATE",
-        "CAST",
-        "EXTRACT",
-        "YEAR",
-        "MONTH",
-        "DAY",
-        "DATE_TRUNC",
-        # Name of the active database/schema: read-only metadata.
-        "DB_NAME",
-        "CURRENT_DATABASE",
-        "CURRENT_SCHEMA",
-    }
+    # Functions can execute arbitrary server code; only the read-only allowlist below.
     for node in tree.find_all(exp.Func):
         if isinstance(node, exp.Connector):
             continue  # AND/OR/XOR are logical operators, modeled as Func by sqlglot>=29
         name = node.name.upper() if isinstance(node, exp.Anonymous) else node.sql_name().upper()
-        if name not in allowed:
+        if name not in SAFE_SQL_FUNCTIONS:
             raise PermissionError(f"Función SQL no autorizada: {name}")
     return query
 
@@ -222,8 +236,39 @@ def execute_write(session, task, agent, args):
         engine.dispose()
 
 
+MAX_DESCRIBED_OBJECTS = 60
+
+
+def _columns(metadata, table, schema):
+    columns = metadata.get_columns(table, schema=schema)
+    return [{"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in columns[:100]], \
+        len(columns) > 100
+
+
+def _row_counts(engine, kind: str, schema: str | None, default_schema: str | None, names: list[str]) -> dict:
+    """Table row counts from metadata, without scanning data; {} when the login cannot read it."""
+    try:
+        with engine.connect() as db:
+            if kind == "sqlserver":
+                rows = db.execute(text(
+                    "SELECT s.name AS sch, t.name AS tbl, SUM(p.rows) AS total FROM sys.tables t "
+                    "JOIN sys.schemas s ON s.schema_id = t.schema_id "
+                    "JOIN sys.partitions p ON p.object_id = t.object_id AND p.index_id IN (0, 1) "
+                    "GROUP BY s.name, t.name"
+                )).mappings()
+                wanted = schema or default_schema
+                return {r["tbl"]: int(r["total"]) for r in rows if r["sch"] == wanted and r["tbl"] in names}
+            if kind == "sqlite":
+                quote = engine.dialect.identifier_preparer.quote
+                return {name: db.execute(text(f"SELECT COUNT(*) FROM {quote(name)}")).scalar() for name in names}
+    except SQLAlchemyError:
+        return {}
+    return {}
+
+
 def describe_connection(
-    session: Session, agent: Agent, connection_id: str, table: str | None = None, schema: str | None = None
+    session: Session, agent: Agent, connection_id: str, table: str | None = None, schema: str | None = None,
+    columns: bool = False,
 ):
     connection = session.get(Connection, connection_id)
     assignment = session.get(AgentConnection, (agent.id, connection_id))
@@ -241,20 +286,38 @@ def describe_connection(
         views = metadata.get_view_names(schema=schema)
         database = connection.config.get("database") or connection.config.get("path")
         if table is None:
-            return {"database": database, "schema": schema, "tables": names[:100], "views": views[:100],
-                    "truncated": len(names) > 100 or len(views) > 100}
+            result = {"database": database, "schema": schema or metadata.default_schema_name,
+                      "tables": names[:100], "views": views[:100],
+                      "truncated": len(names) > 100 or len(views) > 100}
+            if columns:
+                # One call instead of one describe and one COUNT per object: saves agent steps.
+                counts = _row_counts(engine, connection.kind, schema, metadata.default_schema_name,
+                                     names[:MAX_DESCRIBED_OBJECTS])
+                objects = []
+                for kind, items in (("table", names), ("view", views)):
+                    for name in items:
+                        if len(objects) >= MAX_DESCRIBED_OBJECTS:
+                            break
+                        cols, cut = _columns(metadata, name, schema)
+                        objects.append({"name": name, "kind": kind, "rows": counts.get(name), "columns": cols,
+                                        "columns_truncated": cut})
+                result["objects"] = objects
+                result["objects_truncated"] = len(names) + len(views) > len(objects)
+                result["rows_note"] = ("rows es el total de filas según los metadatos del servidor; null en vistas "
+                                       "o sin permiso: use sql.query con SELECT COUNT(*) si lo necesita")
+            return result
         if table not in names and table not in views:
             raise ValueError("La tabla o vista no existe en el esquema solicitado")
-        columns = metadata.get_columns(table, schema=schema)
+        cols, cut = _columns(metadata, table, schema)
         return {
             "database": database,
             "table": table,
             "kind": "view" if table in views else "table",
             "schema": schema,
-            "columns": [
-                {"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in columns[:100]
-            ],
-            "truncated": len(columns) > 100,
+            "rows": _row_counts(engine, connection.kind, schema, metadata.default_schema_name, [table]).get(table)
+            if table in names else None,
+            "columns": cols,
+            "truncated": cut,
         }
     finally:
         engine.dispose()

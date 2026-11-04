@@ -135,9 +135,12 @@ BUILTINS = [
     ),
     (
         "sql.describe",
-        "Conocer la base activa, tablas, vistas y columnas reales antes de formular consultas SQL. Solo metadatos",
+        "Conocer la base activa, tablas, vistas y columnas reales antes de formular consultas SQL. "
+        "Con columns=true y sin table entrega en una sola llamada columnas, tipos y filas de todas las tablas "
+        "y vistas; úselo en lugar de describir y contar una por una. Solo metadatos",
         "sql.describe",
-        schema({"connection_id": TEXT, "table": TEXT, "schema": TEXT}, ["connection_id"]),
+        schema({"connection_id": TEXT, "table": TEXT, "schema": TEXT, "columns": {"type": "boolean"}},
+               ["connection_id"]),
         [],
     ),
     (
@@ -176,7 +179,7 @@ def register_builtins(session: Session):
             )
         elif existing.builtin:
             existing.parameters = parameters
-            if name in {"python.execute", "web.fetch"}:
+            if name in {"python.execute", "web.fetch", "sql.describe"}:
                 existing.description = description
             existing.config = {**existing.config, "risk": risk}
     session.commit()
