@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import DatabaseError, IntegrityError
 
 from app.agents.engine import worker
+from app.agents.scheduler import clock
 from app.api import router, ws_router
 from app.core.audit import redact
 from app.core.config import DATA_DIR, DATABASE_URL, OLLAMA_URL, TOKEN
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
             initialize_database()
             await worker.start()
         started = True
+        await clock.start()
         logger.info('Sistema listo. Esperando tareas; las consultas periódicas no se imprimen.')
         yield
     except Exception as exc:
@@ -77,6 +79,7 @@ async def lifespan(app: FastAPI):
     finally:
         if started:
             logger.info('Cerrando motor de tareas.')
+            await clock.stop()
             await worker.stop()
         logger.info('Oficina IA detenida.')
         close_log()

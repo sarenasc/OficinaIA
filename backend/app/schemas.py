@@ -140,6 +140,26 @@ class ProcedureInput(Input):
     steps: list[dict] = Field(min_length=1, max_length=20)
 
 
+class ScheduleInput(Input):
+    name: str = Field(min_length=1, max_length=200)
+    office_id: str
+    agent_id: str
+    request: str = Field(min_length=1, max_length=50000)
+    procedure_id: str | None = None
+    inputs: dict = Field(default_factory=dict)
+    time: str = Field(default="07:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    weekdays: list[int] = Field(default_factory=list, max_length=7)
+    priority: int = Field(default=0, ge=0, le=10)
+    active: bool = True
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, value):
+        if any(day not in range(1, 8) for day in value) or len(set(value)) != len(value):
+            raise ValueError("weekdays: números del 1 (lunes) al 7 (domingo) sin repetir; vacío = todos los días")
+        return sorted(value)
+
+
 class RelationInput(Input):
     source_id: str
     target_id: str

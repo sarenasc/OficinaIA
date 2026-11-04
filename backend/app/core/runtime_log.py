@@ -46,6 +46,8 @@ def close():
 
 EVENTS = {
     'task.created': 'Tarea creada', 'task.started': 'Tarea iniciada',
+    'schedule.fired': 'Programación inició su tarea', 'schedule.skipped': 'Programación omitida: la tarea anterior sigue en curso',
+    'schedule.error': 'Programación no pudo crear su tarea',
     'task.completed': 'Tarea completada', 'task.error': 'Tarea finalizada con error',
     'task.cancelled': 'Tarea cancelada', 'task.waiting_approval': 'Esperando aprobación del usuario',
     'agent.delegated': 'Tarea delegada', 'agent.failed': 'Fallo del agente',

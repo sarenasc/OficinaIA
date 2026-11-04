@@ -16,6 +16,7 @@ for _module in (
     "offices",
     "runtime",
     "consumption",
+    "reports",
     "backups",
     "progress",
     "scene",

@@ -59,6 +59,7 @@ export function App() {
       'providers',
       'skills',
       'procedures',
+      'schedules',
       'relations',
       'tasks',
       'artifacts',
@@ -452,6 +453,15 @@ export function App() {
                 completarlas después; cada agente recibe sus conexiones por separado.
               </p>
             )}
+            {section === 'schedules' && (
+              <p className="muted">
+                El agente inicia su tarea el día y la hora indicados mientras Oficina IA esté
+                abierta (hora de Chile continental). Si la abres más tarde ese mismo día, la tarea
+                parte al abrirla; los días con la aplicación cerrada no se recuperan. Cada
+                programación se ejecuta como máximo una vez al día y se omite si su tarea anterior
+                sigue en curso.
+              </p>
+            )}
             {section === 'tools' && (
               <p className="muted">
                 Integradas: archivos, Excel, SQL, internet/APIs, PDF y Python Docker.
@@ -477,6 +487,19 @@ export function App() {
                       {row.has_credential ? 'Actualizar credencial' : 'Configurar credencial'}
                     </button>
                   </>
+                ) : section === 'schedules' ? (
+                  <button
+                    disabled={!row.active}
+                    onClick={() =>
+                      void perform(async () => {
+                        const task = await api(`schedules/${row.id}/run`, 'POST');
+                        setNotice(`Programación ejecutada: ${task.number}`);
+                        await refresh();
+                      })
+                    }
+                  >
+                    Ejecutar ahora
+                  </button>
                 ) : section === 'procedures' ? (
                   <button
                     onClick={() => {

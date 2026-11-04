@@ -154,6 +154,24 @@ class Procedure(Entity, Base):
     steps: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class Schedule(Entity, Base):
+    """Time trigger: while the application is open, creates the agent's task on the configured days."""
+
+    __tablename__ = "schedules"
+    name: Mapped[str] = mapped_column(String(200))
+    office_id: Mapped[str] = mapped_column(ForeignKey("offices.id", ondelete="CASCADE"))
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    request: Mapped[str] = mapped_column(Text)
+    procedure_id: Mapped[str | None] = mapped_column(ForeignKey("procedures.id", ondelete="SET NULL"), nullable=True)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    time: Mapped[str] = mapped_column(String(5), default="07:00")
+    weekdays: Mapped[list] = mapped_column(JSON, default=list)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run_date: Mapped[str] = mapped_column(String(10), default="")
+    last_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
 class Task(Entity, Base):
     __tablename__ = "tasks"
     number: Mapped[str] = mapped_column(String(100), unique=True)

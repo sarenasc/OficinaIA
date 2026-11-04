@@ -546,3 +546,26 @@ pre {
 .icon-symbol {
   font-size: 22px;
 }
+
+.report-download {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e2e8ec;
+}
+.report-download h3,
+.report-download p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.report-download label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.report-download input {
+  width: 170px;
+}

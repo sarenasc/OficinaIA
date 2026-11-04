@@ -41,6 +41,7 @@ ENTITIES = {
     "skills": (m.Skill, s.SkillInput),
     "procedures": (m.Procedure, s.ProcedureInput),
     "relations": (m.AgentRelation, s.RelationInput),
+    "schedules": (m.Schedule, s.ScheduleInput),
 }
 READONLY = {
     "tasks": m.Task,
@@ -168,6 +169,11 @@ def validate_domain(session: Session, entity: str, data: dict, current=None):
                 raise ValueError("Paso requiere agent_id, tool y arguments")
             if get_or_404(session, m.Agent, step["agent_id"]).office_id != data["office_id"]:
                 raise ValueError("Todos los agentes deben pertenecer a la oficina")
+    if entity == "schedules":
+        if get_or_404(session, m.Agent, data["agent_id"]).office_id != data["office_id"]:
+            raise ValueError("El agente debe pertenecer a la oficina de la programación")
+        if data.get("procedure_id") and get_or_404(session, m.Procedure, data["procedure_id"]).office_id != data["office_id"]:
+            raise ValueError("El procedimiento debe pertenecer a la oficina de la programación")
     if entity == "relations":
         source, target = (
             get_or_404(session, m.Agent, data["source_id"]),

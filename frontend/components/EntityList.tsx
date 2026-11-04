@@ -1,6 +1,12 @@
 import type { Row } from '../api';
 import { Status } from './Status';
 
+const DAYS = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+export function scheduleDays(days: number[] = []) {
+  if (!days.length || days.length === 7) return 'Todos los días';
+  if (days.join() === '1,2,3,4,5') return 'Lunes a viernes';
+  return days.map((day) => DAYS[day - 1]).join(', ');
+}
 export function EntityList({
   entity,
   rows,
@@ -31,6 +37,14 @@ export function EntityList({
                 {row.active ? 'Activa' : 'Guardada para configurar después'}
                 {row.config?.host && ` · ${row.config.host}`}
                 {row.config?.database && ` · ${row.config.database}`}
+              </p>
+            )}
+            {entity === 'schedules' && (
+              <p className="muted">
+                {row.active ? 'Activa' : 'Pausada'} · {scheduleDays(row.weekdays)} a las {row.time}
+                {row.last_run_date
+                  ? ` · última ejecución ${row.last_run_date}`
+                  : ' · aún no se ejecuta'}
               </p>
             )}
             {entity === 'agents' && (

@@ -20,6 +20,11 @@ from app.security.permissions import resource_path
 
 @router.post("/tasks")
 async def create_task(data: s.TaskInput, session: Session = Depends(get_session)):
+    return serialize(new_task(session, data))
+
+
+def new_task(session: Session, data: s.TaskInput, source: dict | None = None) -> m.Task:
+    """Shared by the API and the schedule clock; submits the task to the worker."""
     office = get_or_404(session, m.Office, data.office_id)
     agent = get_or_404(session, m.Agent, data.agent_id)
     if not office.active or agent.office_id != office.id or agent.status == "disabled":
@@ -30,6 +35,8 @@ async def create_task(data: s.TaskInput, session: Session = Depends(get_session)
         if procedure.office_id != office.id:
             raise HTTPException(422, "Procedimiento pertenece a otra oficina")
         context = {"procedure_steps": copy.deepcopy(procedure.steps), "inputs": data.inputs, "outputs": []}
+    if source:
+        context["source"] = source
     id = str(uuid4())
     task = m.Task(
         id=id,
@@ -42,9 +49,10 @@ async def create_task(data: s.TaskInput, session: Session = Depends(get_session)
     )
     session.add(task)
     session.commit()
-    audit(session, "task.created", {"request": data.request}, task.id, agent.id)
+    audit(session, "task.created", {"request": data.request, **({"source": source} if source else {})},
+          task.id, agent.id)
     worker.submit(task.id)
-    return serialize(task)
+    return task
 
 
 @router.post("/tasks/{id}/cancel")
@@ -114,3 +122,19 @@ def download_artifact(id: str, session: Session = Depends(get_session)):
     relative = str(Path(artifact.path).relative_to(Path(resource.path).resolve()))
     path = resource_path(session, agent, artifact.resource_id, relative, "read")
     return FileResponse(path, filename=artifact.name)
+
+
+@router.post("/schedules/{id}/run")
+def run_schedule_now(id: str, session: Session = Depends(get_session)):
+    """Manual test of a schedule: same request and inputs, without waiting for its time."""
+    from app.agents.scheduler import ZONE, fill, placeholders
+
+    schedule = get_or_404(session, m.Schedule, id)
+    values = placeholders(datetime.now(ZONE))
+    task = new_task(session, s.TaskInput(
+        office_id=schedule.office_id, agent_id=schedule.agent_id, request=fill(schedule.request, values),
+        priority=schedule.priority, procedure_id=schedule.procedure_id, inputs=fill(schedule.inputs or {}, values),
+    ), source={"schedule_id": schedule.id, "schedule": schedule.name, "manual": True})
+    schedule.last_task_id = task.id
+    session.commit()
+    return serialize(task)
