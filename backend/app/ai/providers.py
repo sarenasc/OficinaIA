@@ -91,7 +91,44 @@ def parse_response(content: str, *, encoded_arguments=False) -> dict:
     return value
 
 
-ANTHROPIC_MAX_TOKENS = 16000
+# Streaming: thinking and long tool arguments (a whole PDF report) share this budget; above ~16000
+# a non-streamed request risks HTTP timeouts.
+ANTHROPIC_MAX_TOKENS = 64000
+
+
+async def read_anthropic_stream(response) -> dict:
+    """Server-sent events of /v1/messages rebuilt into the non-streamed response shape."""
+    blocks, usage, stop_reason, event = {}, {}, None, ""
+    async for line in response.aiter_lines():
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if not line.startswith("data:"):
+            continue
+        try:
+            data = json.loads(line[5:])
+        except ValueError:
+            continue
+        kind = data.get("type", event)
+        if kind == "message_start":
+            usage.update(data.get("message", {}).get("usage") or {})
+        elif kind == "content_block_start":
+            block = data.get("content_block") or {}
+            blocks[data.get("index", len(blocks))] = {"type": block.get("type"), "text": block.get("text", "")}
+        elif kind == "content_block_delta":
+            delta = data.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                blocks.setdefault(data.get("index", 0), {"type": "text", "text": ""})["text"] += delta.get("text", "")
+        elif kind == "message_delta":
+            stop_reason = (data.get("delta") or {}).get("stop_reason") or stop_reason
+            usage.update(data.get("usage") or {})
+        elif kind == "error":
+            error = data.get("error") or {}
+            detail = ": ".join(str(part) for part in (error.get("type"), error.get("message")) if part)
+            raise ModelCallError(f"Proveedor anthropic interrumpió la respuesta ({detail[:300]})", "provider_http", 1)
+    return {"content": [blocks[index] for index in sorted(blocks)], "stop_reason": stop_reason, "usage": usage}
+
+
 API_SUFFIXES = ("/messages", "/chat/completions", "/models")
 
 
@@ -183,9 +220,8 @@ class HTTPProvider(AIProvider):
             elif provider.kind == "anthropic":
                 endpoint = base + "/messages"
                 headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
-                # 16000: room for long final reports; higher values need streaming to stay under HTTP timeouts.
-                body = {"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "system": messages[0]["content"],
-                        "messages": messages[1:]}
+                body = {"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "stream": True,
+                        "system": messages[0]["content"], "messages": messages[1:]}
                 body['output_config'] = {'format': {'type': 'json_schema', 'schema': ANTHROPIC_ACTION_SCHEMA}}
                 body['system'] += ('\nFormato de transporte: devuelve un objeto con type=tool/delegate/final. '
                                    'Para tool usa name y arguments_json (argumentos serializados como cadena JSON), '
@@ -204,7 +240,7 @@ class HTTPProvider(AIProvider):
                 }
             else:
                 raise ValueError("Proveedor pendiente")
-        # External: a 16000-token answer can take several minutes (same 10-minute default as the official SDK).
+        # External: long answers take minutes; with streaming this bounds each silence, not the whole answer.
         seconds = 300 if provider.kind == "ollama" else 600
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(seconds, connect=10), follow_redirects=False, trust_env=False
@@ -215,11 +251,20 @@ class HTTPProvider(AIProvider):
                 # read timeouts/HTTP errors may have started work and are not replayed.
                 for attempts in (1, 2):
                     try:
-                        response = await client.post(endpoint, json=body, headers=headers)
+                        response = await client.send(client.build_request("POST", endpoint, json=body, headers=headers),
+                                                     stream=True)
                         break
                     except httpx.ConnectError:
                         if attempts == 2:
                             raise
+                try:
+                    streamed = (response.status_code < 400 and
+                                response.headers.get("content-type", "").startswith("text/event-stream"))
+                    data = await read_anthropic_stream(response) if streamed else None
+                    if not streamed:
+                        await response.aread()
+                finally:
+                    await response.aclose()
             except httpx.TimeoutException as exc:
                 raise ModelCallError(
                     f"{provider.kind} / {model}: tiempo de espera agotado ({seconds} s). El modelo puede estar cargando o ser demasiado lento; pruebe una solicitud breve o un modelo menor",
@@ -236,7 +281,7 @@ class HTTPProvider(AIProvider):
                 raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}"
                                      + provider_error_detail(response), "provider_http", attempts)
             try:
-                data = response.json()
+                data = data if streamed else response.json()
             except ValueError:
                 raise ModelCallError(f'Proveedor {provider.kind}: HTTP {response.status_code} sin un cuerpo JSON válido '
                                      '(respuesta vacía o no JSON)', 'provider_response', attempts) from None
@@ -256,8 +301,9 @@ class HTTPProvider(AIProvider):
             tin, tout = data.get("usage", {}).get("prompt_tokens", 0), data.get("usage", {}).get("completion_tokens", 0)
         elif provider.kind == "anthropic":
             if data.get('stop_reason') == 'max_tokens':
-                raise ModelCallError(f'Claude cortó la respuesta al llegar a {ANTHROPIC_MAX_TOKENS} tokens de salida; '
-                                     'pida un resultado más breve o divídalo en varias tareas',
+                raise ModelCallError(f'Claude cortó la respuesta al llegar a {ANTHROPIC_MAX_TOKENS} tokens de salida. '
+                                     'Pida el informe por partes (por ejemplo, primero el Excel y luego el PDF) o '
+                                     'con menos texto',
                                      'model_truncated', attempts)
             if data.get('stop_reason') == 'refusal':
                 raise ModelCallError('Claude rechazó la solicitud; revise la tarea antes de volver a intentarla',

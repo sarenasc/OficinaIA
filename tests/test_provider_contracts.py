@@ -160,4 +160,46 @@ async def test_anthropic_requests_room_for_long_reports(monkeypatch):
     await HTTPProvider().complete(Provider(kind='anthropic', url='https://api.anthropic.com/v1'),
                                   Agent(temperature=0.2, context_limit=8192), 'claude-sonnet-5-5',
                                   [{'role': 'system', 'content': 'JSON'}, {'role': 'user', 'content': 'Hola'}])
-    assert bodies[0]['max_tokens'] == 16000
+    assert bodies[0]['max_tokens'] == 64000 and bodies[0]['stream'] is True
+
+
+def sse(*events):
+    return ''.join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events).encode()
+
+
+@pytest.mark.parametrize('ending', ['end_turn', 'max_tokens', 'error'])
+async def test_anthropic_streamed_response_is_rebuilt(ending, monkeypatch):
+    action = json.dumps({'type': 'tool', 'name': 'pdf.create', 'arguments_json': json.dumps({'title': 'Informe'})})
+    events = [
+        ('message_start', {'type': 'message_start', 'message': {'usage': {'input_tokens': 900, 'output_tokens': 1}}}),
+        ('content_block_start', {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'thinking', 'thinking': ''}}),
+        ('content_block_delta', {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'thinking_delta', 'thinking': 'x'}}),
+        ('content_block_start', {'type': 'content_block_start', 'index': 1, 'content_block': {'type': 'text', 'text': ''}}),
+        ('content_block_delta', {'type': 'content_block_delta', 'index': 1, 'delta': {'type': 'text_delta', 'text': action[:20]}}),
+        ('ping', {'type': 'ping'}),
+        ('content_block_delta', {'type': 'content_block_delta', 'index': 1, 'delta': {'type': 'text_delta', 'text': action[20:]}}),
+    ]
+    if ending == 'error':
+        events.append(('error', {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}}))
+    else:
+        events.append(('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': ending}, 'usage': {'output_tokens': 321}}))
+        events.append(('message_stop', {'type': 'message_stop'}))
+
+    def handler(request):
+        return httpx.Response(200, content=sse(*events), headers={'content-type': 'text/event-stream'})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(secrets, 'get', lambda ref: 'fixture-key')
+    call = HTTPProvider().complete(Provider(kind='anthropic', url='https://api.anthropic.com/v1'),
+                                   Agent(temperature=0.2, context_limit=64000), 'claude-sonnet-5-5',
+                                   [{'role': 'system', 'content': 'JSON'}, {'role': 'user', 'content': 'Hola'}])
+    if ending == 'end_turn':
+        response = await call
+        assert response.action['name'] == 'pdf.create' and response.action['arguments'] == {'title': 'Informe'}
+        assert (response.tokens_in, response.tokens_out) == (900, 321)
+    else:
+        with pytest.raises(ModelCallError) as error:
+            await call
+        assert error.value.category == ('model_truncated' if ending == 'max_tokens' else 'provider_http')
+        assert '64000' in str(error.value) if ending == 'max_tokens' else 'overloaded_error' in str(error.value)
