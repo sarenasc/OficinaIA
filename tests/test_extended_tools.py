@@ -128,6 +128,7 @@ def test_sql_calculations_export_directly_and_deny_writes(client, tmp_path):
     with sqlite3.connect(source) as db:
         db.execute("CREATE TABLE sales (producto TEXT, total INTEGER)")
         db.executemany("INSERT INTO sales VALUES (?, ?)", [("Cuaderno", 1500), ("Cuaderno", 3000)])
+        db.execute("CREATE VIEW resumen AS SELECT producto, SUM(total) AS total FROM sales GROUP BY producto")
     connection = create(client, "connections", name="SQL prueba", kind="sqlite", config={"path": str(source)})
     assigned = client.get(f"/api/agents/{agent['id']}/assignments").json()
     assigned["connections"] = [{"connection_id": connection["id"], "permissions": ["connect", "select"]}]
@@ -136,6 +137,11 @@ def test_sql_calculations_export_directly_and_deny_writes(client, tmp_path):
     assert metadata["status"] == "completed", metadata
     assert "producto" in metadata["result"]
     assert "INTEGER" in metadata["result"]
+    listing = run_tool(client, office, agent, "sql.describe", {"connection_id": connection["id"]})
+    assert listing["status"] == "completed", listing
+    assert '"views": ["resumen"]' in listing["result"] and str(source).replace("\\", "\\\\") in listing["result"]
+    view = run_tool(client, office, agent, "sql.describe", {"connection_id": connection["id"], "table": "resumen"})
+    assert view["status"] == "completed" and '"kind": "view"' in view["result"], view
     args = {
         "connection_id": connection["id"],
         "query": "SELECT producto, SUM(total) AS ventas FROM sales GROUP BY producto",

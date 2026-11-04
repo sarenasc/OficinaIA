@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import models as m
 from app import schemas as s
-from app.ai.providers import validate_provider
+from app.ai.providers import normalize_url, validate_provider
 from app.core.audit import SENSITIVE
 from app.core.config import TOKEN
 
@@ -119,6 +119,7 @@ def validate_domain(session: Session, entity: str, data: dict, current=None):
                 raise ValueError("Fallback requiere provider_id y model")
             get_or_404(session, m.Provider, item["provider_id"])
     if entity == "providers":
+        data["url"] = normalize_url(data.get("kind", ""), data.get("url", ""))
         validate_provider(m.Provider(**data), data.get("default_model", ""))
     if entity == "resources" and data["kind"] in {"directory", "network_directory", "file"}:
         path = Path(data["path"])

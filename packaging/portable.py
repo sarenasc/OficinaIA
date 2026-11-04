@@ -4,7 +4,6 @@ import ctypes
 import json
 import multiprocessing
 import os
-from pathlib import Path
 import runpy
 import secrets
 import socket
@@ -13,6 +12,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from pathlib import Path
 
 
 def main():
@@ -25,6 +25,8 @@ def main():
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir', type=Path)
     parser.add_argument('--self-test', action='store_true', help='Prueba aislada; exige una carpeta nueva')
+    parser.add_argument('--base-nueva', action='store_true',
+                        help='Empieza con una base vacía; la actual se conserva apartada, no se borra')
     args = parser.parse_args()
     if args.self_test and (not args.data_dir or args.data_dir.exists()):
         raise ValueError('--self-test requiere --data-dir con una carpeta que no exista')
@@ -35,11 +37,18 @@ def main():
     token = secrets.token_urlsafe(32)
     os.environ['OFFICE_SESSION_TOKEN'] = token
     os.environ['OFFICE_DATA_DIR'] = str(directory)
-    os.environ['OFFICE_DATABASE_URL'] = 'sqlite:///' + str(directory / 'office.db')
     if getattr(sys, 'frozen', False):
         os.environ['OFFICE_NATIVE_EXECUTABLE'] = sys.executable
     else:
         sys.path.insert(0, str(root / 'backend'))
+    from app.core.storage import database_path, reset
+    # Outside OneDrive/Dropbox: synchronized SQLite files get corrupted.
+    database = database_path(directory)
+    if args.base_nueva:
+        kept = reset(database)
+        print('Base nueva. ' + ('Base anterior apartada como ' + str(kept) if kept else 'No había base anterior.'),
+              flush=True)
+    os.environ['OFFICE_DATABASE_URL'] = 'sqlite:///' + str(database)
     # Reserve-check before initializing the database or starting background jobs.
     with socket.socket() as probe:
         try:
@@ -48,8 +57,8 @@ def main():
             print('ERROR: no se pudo reservar 127.0.0.1:38080. Compruebe si ya hay otra instancia abierta.', flush=True)
             raise
     import uvicorn
-    from fastapi.staticfiles import StaticFiles
     from app.main import app
+    from fastapi.staticfiles import StaticFiles
     app.mount('/', StaticFiles(directory=str(bundled / 'dist'), html=True), name='frontend')
 
     def open_when_ready():
@@ -131,6 +140,7 @@ def main():
         threading.Thread(target=open_when_ready, daemon=True).start()
     print('Oficina IA sin Docker. Cierre esta ventana para detener el sistema.', flush=True)
     print('Datos: ' + str(directory), flush=True)
+    print('Base de datos: ' + str(database), flush=True)
     server.run()
     if failures:
         raise failures[0]

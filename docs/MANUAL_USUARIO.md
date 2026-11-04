@@ -176,7 +176,7 @@ El indicador «conectado» confirma disponibilidad, no que toda tarea termine co
 2. En **Proveedores IA → + Crear**:
    - Nombre: `Claude`.
    - Tipo: `anthropic`.
-   - URL: `https://api.anthropic.com/v1`.
+   - URL: `https://api.anthropic.com/v1`. Si escribes `https://api.anthropic.com` o pegas `.../v1/messages`, se guarda como `https://api.anthropic.com/v1`.
    - Activo: marcado.
 3. Guarda y usa **Configurar credencial** para introducir la API key.
 4. Pulsa **Probar conexión / modelos** y copia un identificador disponible al modelo predeterminado.

@@ -114,3 +114,33 @@ def test_invalid_model_actions_have_safe_errors(content):
     with pytest.raises(ModelCallError) as error:
         parse_response(content, encoded_arguments=True)
     assert error.value.category == 'invalid_model_action'
+
+
+@pytest.mark.parametrize("url", [
+    "https://api.anthropic.com", "https://api.anthropic.com/", "https://api.anthropic.com/v1/",
+    "https://api.anthropic.com/v1/messages", " https://api.anthropic.com/v1/models ",
+])
+def test_anthropic_url_is_normalized_to_v1_base(client, url):
+    response = client.post("/api/providers", json={"name": "Claude", "kind": "anthropic", "url": url})
+    assert response.status_code == 200, response.text
+    assert response.json()["url"] == "https://api.anthropic.com/v1"
+
+
+def test_wrong_api_version_path_is_rejected(client):
+    response = client.post("/api/providers", json={"name": "Claude", "kind": "anthropic",
+                                                   "url": "https://api.anthropic.com/v2"})
+    assert response.status_code == 422 and "/v1" in response.json()["detail"]
+
+
+async def test_discover_404_explains_url(monkeypatch):
+    from app.ai.providers import discover
+
+    def handler(request):
+        assert request.url.path == "/v1/models"
+        return httpx.Response(404, json={"type": "error", "error": {"type": "not_found_error", "message": "Not found"}})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    monkeypatch.setattr(secrets, "get", lambda ref: "test-key")
+    with pytest.raises(ValueError, match="not_found_error.*URL base"):
+        await discover(Provider(kind="anthropic", url="https://api.anthropic.com"))

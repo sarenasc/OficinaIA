@@ -135,7 +135,7 @@ BUILTINS = [
     ),
     (
         "sql.describe",
-        "Conocer tablas y columnas reales antes de formular consultas SQL. Solo metadatos",
+        "Conocer la base activa, tablas, vistas y columnas reales antes de formular consultas SQL. Solo metadatos",
         "sql.describe",
         schema({"connection_id": TEXT, "table": TEXT, "schema": TEXT}, ["connection_id"]),
         [],

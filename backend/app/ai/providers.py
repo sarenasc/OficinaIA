@@ -91,7 +91,23 @@ def parse_response(content: str, *, encoded_arguments=False) -> dict:
     return value
 
 
+API_SUFFIXES = ("/messages", "/chat/completions", "/models")
+
+
+def normalize_url(kind: str, url: str) -> str:
+    """Accept https://api.anthropic.com, .../v1/ or .../v1/messages; store the base .../v1."""
+    url = (url or "").strip().rstrip("/")
+    if kind in {"openai", "anthropic"}:
+        for suffix in API_SUFFIXES:
+            if url.endswith(suffix):
+                url = url[: -len(suffix)].rstrip("/")
+        if not urlparse(url).path:
+            url += "/v1"
+    return url
+
+
 def validate_provider(provider: Provider, model: str = ""):
+    provider.url = normalize_url(provider.kind, provider.url)
     parsed = urlparse(provider.url)
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("URL de proveedor inválida")
@@ -108,10 +124,29 @@ def validate_provider(provider: Provider, model: str = ""):
         }
         if parsed.scheme != "https" or parsed.hostname != hosts.get(provider.kind):
             raise ValueError("Proveedor externo requiere su endpoint HTTPS oficial")
+        if provider.kind in {"openai", "anthropic"} and parsed.path != "/v1":
+            raise ValueError(f"{provider.kind} requiere la URL base https://{parsed.hostname}/v1")
         if provider.kind == "gemini" and parsed.path.rstrip("/") not in {"/v1beta", "/v1"}:
             raise ValueError(
                 "Gemini requiere una URL base, por ejemplo https://generativelanguage.googleapis.com/v1beta; no incluya /models ni :generateContent"
             )
+
+
+def provider_error_detail(response) -> str:
+    """'invalid_request_error: ...' from OpenAI/Anthropic/Gemini error bodies, bounded and redacted."""
+    from app.core.audit import redact
+
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        return ""
+    if isinstance(error, dict):
+        kind = error.get("type") or error.get("status") or ""
+        message = error.get("message") or ""
+    else:
+        kind, message = "", error if isinstance(error, str) else ""
+    text = ": ".join(str(part) for part in (kind, message) if part)
+    return f" ({redact(text)[:300]})" if text else ""
 
 
 class HTTPProvider(AIProvider):
@@ -193,8 +228,9 @@ class HTTPProvider(AIProvider):
             except httpx.RequestError as exc:
                 raise ModelCallError(f"La conexión con {provider.kind} se interrumpió ({type(exc).__name__})", "network", attempts) from exc
             if response.status_code >= 400:
-                # Do not leak error bodies, request headers or credential-bearing URLs.
-                raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}", "provider_http", attempts)
+                # Only the provider's own error type/message; never headers or credential-bearing URLs.
+                raise ModelCallError(f"Proveedor {provider.kind} devolvió HTTP {response.status_code}"
+                                     + provider_error_detail(response), "provider_http", attempts)
             try:
                 data = response.json()
             except ValueError:
@@ -270,7 +306,9 @@ async def discover(provider: Provider):
     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
         result = await client.get(url, headers=headers)
         if result.status_code >= 400:
-            raise ValueError(f"Prueba de proveedor falló: HTTP {result.status_code}")
+            hint = " (revise la URL base del proveedor)" if result.status_code == 404 else ""
+            raise ValueError(f"Prueba de proveedor falló: HTTP {result.status_code}"
+                             + provider_error_detail(result) + hint)
         data = result.json()
     if provider.kind == "ollama":
         return [
