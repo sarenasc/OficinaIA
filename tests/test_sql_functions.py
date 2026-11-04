@@ -114,3 +114,17 @@ def test_tool_results_fit_the_agent_context():
     messages += [{"role": "user", "content": "Resultado herramienta: " + "x" * 5000} for _ in range(6)]
     total = compact_history(messages, 20000)
     assert total <= 20000 and len(messages[-1]["content"]) > 5000 and messages[2]["content"].endswith("auditoría]")
+
+
+def test_result_budget_shrinks_with_the_room_left():
+    from types import SimpleNamespace
+
+    from app.agents.engine import compact_history, result_budget
+
+    agent = SimpleNamespace(context_limit=8192)
+    assert result_budget(agent) == 8192
+    assert result_budget(agent, [{"content": "x" * 20000}]) == (32768 - 20000) // 3
+    assert result_budget(agent, [{"content": "x" * 32000}]) == 1500
+    big = [{"role": "system", "content": "s" * 17000}, {"role": "user", "content": "pedido"}]
+    big += [{"role": "user", "content": "Resultado herramienta: " + "x" * 4000} for _ in range(4)]
+    assert compact_history(big, 32768) <= 32768 and len(big[-1]["content"]) > 4000

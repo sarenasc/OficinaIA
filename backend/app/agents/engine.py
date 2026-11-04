@@ -139,9 +139,12 @@ def save_context(session: Session, task: Task, context: dict):
     session.commit()
 
 
-def result_budget(agent) -> int:
-    """Characters one tool result may take in the model context: about a quarter of it (4 chars/token)."""
-    return max(3000, int(getattr(agent, "context_limit", 0) or 0))
+def result_budget(agent, messages: list[dict] | None = None) -> int:
+    """Characters one tool result may take: a third of the room left in the context (4 chars/token),
+    at most a quarter of the whole context and never below a readable minimum."""
+    limit = int(getattr(agent, "context_limit", 0) or 0) * 4
+    used = sum(len(m["content"]) for m in messages or [])
+    return max(1500, min(limit // 4, (limit - used) // 3))
 
 
 def _fit(items: list, budget: int) -> list:
@@ -160,16 +163,18 @@ TOOL_RESULT_PREFIX = "Resultado herramienta: "
 def compact_history(messages: list[dict], limit: int) -> int:
     """Shorten the oldest tool results (complete in the audit) before giving up on the context limit.
 
-    The system prompt, the request and the two latest messages are kept intact."""
+    The system prompt, the request and the latest message are kept intact. Oldest first, first to
+    600 characters and, if that is not enough, to 200."""
     total = sum(len(m["content"]) for m in messages)
-    for message in messages[2:-2]:
-        if total <= limit:
-            break
-        content = message["content"]
-        if message["role"] == "user" and content.startswith(TOOL_RESULT_PREFIX) and len(content) > 800:
-            short = content[:600] + " … [resultado anterior resumido para ahorrar contexto; completo en auditoría]"
-            total -= len(content) - len(short)
-            message["content"] = short
+    for keep in (600, 200):
+        for message in messages[2:-1]:
+            if total <= limit:
+                return total
+            content = message["content"]
+            if message["role"] == "user" and content.startswith(TOOL_RESULT_PREFIX) and len(content) > keep + 200:
+                short = content[:keep] + " … [resultado anterior resumido para ahorrar contexto; completo en auditoría]"
+                total -= len(content) - len(short)
+                message["content"] = short
     return total
 
 
@@ -378,10 +383,12 @@ async def run_agents(session: Session, task: Task):
             limit = agent.context_limit * 4
             total = compact_history(frame["messages"], limit)
             if total > limit:
+                fixed = len(frame["messages"][0]["content"])
                 raise ValueError(
                     f"Contexto excede el límite configurado ({total} de {limit} caracteres, "
-                    f"límite de contexto {agent.context_limit}). Aumente el límite de contexto del agente "
-                    "si su modelo lo admite, o divida la tarea"
+                    f"límite de contexto {agent.context_limit}; instrucciones y herramientas ocupan {fixed}). "
+                    "Aumente el límite de contexto del agente si su modelo lo admite (Claude admite 64000 o más), "
+                    "quite herramientas que no use, o divida la tarea"
                 )
             try:
                 action = await model_action(session, task, agent, frame["messages"])
@@ -429,7 +436,7 @@ async def run_agents(session: Session, task: Task):
                 continue
             execution = session.scalar(select(Execution).where(Execution.task_id == task.id, Execution.agent_id == agent.id,
                                        Execution.tool_name == action["name"]).order_by(Execution.created_at.desc()).limit(1))
-            preview = model_tool_result(result, result_budget(agent))
+            preview = model_tool_result(result, result_budget(agent, frame["messages"]))
             if preview.get("preview_only") and execution:
                 preview = {**preview, "execution_id": execution.id}
             frame["messages"].append({"role": "user", "content": TOOL_RESULT_PREFIX +
