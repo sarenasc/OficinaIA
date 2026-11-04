@@ -362,6 +362,17 @@ async def run_agents(session: Session, task: Task):
                 {"role": "system", "content": instructions(session, agent)},
                 {"role": "user", "content": frame["request"]},
             ]
+            fixed = sum(len(m["content"]) for m in frame["messages"])
+            provider = session.get(Provider, agent.provider_id) if agent.provider_id else None
+            if provider and provider.kind != "ollama" and fixed > agent.context_limit * 4 * 0.6:
+                # Fail before paying for model calls that cannot fit any real tool result.
+                suggested = max(64000, -(-fixed * 3 // 4000) * 1000)
+                raise ValueError(
+                    f"{agent.name}: instrucciones, herramientas y solicitud ocupan {fixed} de "
+                    f"{agent.context_limit * 4} caracteres (límite de contexto {agent.context_limit}); no queda espacio "
+                    f"para resultados. Suba el límite de contexto del agente a {suggested} o más si su modelo lo admite, "
+                    "o quite herramientas que no use"
+                )
             values = terminal_values(frame["request"])
             direct = direct_tool_request(frame["request"])
             if direct:

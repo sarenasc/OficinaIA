@@ -190,3 +190,25 @@ def test_social_draft_never_claims_publication(client, tmp_path):
     assert draft["published"] is False
     assert draft["requires_publish_approval"] is True
     assert draft["status"] == "draft"
+
+
+def test_sql_server_side_error_becomes_correctable(client, tmp_path):
+    from app.core.db import SessionLocal
+    from app.models import Agent, Task
+    from app.tools.registry import ToolArgumentsError, execute_tool
+
+    office, agent, _ = setup_agent(client, tmp_path)
+    source = tmp_path / "ventas.db"
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE sales (producto TEXT)")
+    connection = create(client, "connections", name="SQL prueba", kind="sqlite", config={"path": str(source)})
+    assigned = client.get(f"/api/agents/{agent['id']}/assignments").json()
+    assigned["connections"] = [{"connection_id": connection["id"], "permissions": ["connect", "select"]}]
+    client.put(f"/api/agents/{agent['id']}/assignments", json=assigned)
+    with SessionLocal() as session:
+        task = Task(number="TEST-sql-error", office_id=office["id"], agent_id=agent["id"], request="x")
+        session.add(task)
+        session.commit()
+        with pytest.raises(ToolArgumentsError, match="no such column"):
+            execute_tool(session, task, session.get(Agent, agent["id"]), "sql.query",
+                         {"connection_id": connection["id"], "query": "SELECT kilos FROM sales"})

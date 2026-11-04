@@ -1,11 +1,12 @@
 """Read-only SQL plus explicit credential references."""
 
+import re
 import time
 
 import sqlglot
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import URL
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlglot import exp
 
@@ -157,6 +158,28 @@ def validate_select(query: str, kind: str):
     return query
 
 
+def server_version(engine) -> str:
+    info = getattr(engine.dialect, "server_version_info", None) or ()
+    version = ".".join(str(part) for part in info[:2])
+    names = {"13": "2016", "14": "2017", "15": "2019", "16": "2022", "17": "2025"}
+    if engine.dialect.name == "mssql" and info:
+        return f"SQL Server {names.get(str(info[0]), version)} ({version})"
+    return version
+
+
+def server_error(exc, engine) -> str:
+    """The server's own message without the echoed SQL or driver noise."""
+    text_ = str(getattr(exc, "orig", exc))
+    message = text_.split("[SQL:")[0]
+    if "[SQL Server]" in message:
+        message = re.split(r"\s*\(\d+\)\s*\(SQL\w+\)", message.split("[SQL Server]", 1)[1])[0]
+    message = message.strip().rstrip(".")[:400]
+    version = server_version(engine)
+    suffix = f" Servidor: {version}." if version else ""
+    return (f"El servidor rechazó la consulta: {message}.{suffix} Corrija la consulta; funciones como STRING_AGG, "
+            "TRIM o CONCAT_WS no existen en versiones antiguas")
+
+
 def query_readonly(session: Session, agent: Agent, connection_id: str, query: str, parameters=None, max_rows=10000,
                    truncate=False):
     """truncate: return the first max_rows rows with truncated=True (exploration) instead of failing (exports)."""
@@ -184,7 +207,12 @@ def query_readonly(session: Session, agent: Agent, connection_id: str, query: st
                 elif connection.kind == "sqlite":
                     deadline = time.monotonic() + 30
                     db.connection.driver_connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
-                records = db.execute(text(query), parameters or {}).mappings().fetchmany(max_rows + 1)
+                try:
+                    records = db.execute(text(query), parameters or {}).mappings().fetchmany(max_rows + 1)
+                except (ProgrammingError, OperationalError) as exc:
+                    # Read-only query refused by the server (syntax, missing column, function not in this
+                    # version): the agent can rewrite it. Connection failures happen before this point.
+                    raise QueryRejected(server_error(exc, engine)) from None
                 truncated = len(records) > max_rows
                 if truncated and not truncate:
                     raise ValueError(f"La consulta excede {max_rows} filas; agregue un límite")
@@ -304,7 +332,8 @@ def describe_connection(
         views = metadata.get_view_names(schema=schema)
         database = connection.config.get("database") or connection.config.get("path")
         if table is None:
-            result = {"database": database, "schema": schema or metadata.default_schema_name,
+            result = {"database": database, "server": server_version(engine),
+                      "schema": schema or metadata.default_schema_name,
                       "tables": names[:100], "views": views[:100],
                       "truncated": len(names) > 100 or len(views) > 100}
             if columns:

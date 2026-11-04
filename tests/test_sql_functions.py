@@ -128,3 +128,20 @@ def test_result_budget_shrinks_with_the_room_left():
     big = [{"role": "system", "content": "s" * 17000}, {"role": "user", "content": "pedido"}]
     big += [{"role": "user", "content": "Resultado herramienta: " + "x" * 4000} for _ in range(4)]
     assert compact_history(big, 32768) <= 32768 and len(big[-1]["content"]) > 4000
+
+
+def test_server_errors_are_returned_for_rewriting():
+    from app.tools.connections import server_error
+
+    class Dialect:
+        name, server_version_info = "mssql", (13, 0, 5026)
+
+    class Engine:
+        dialect = Dialect()
+
+    class Failure(Exception):
+        orig = Exception("('42000', \"[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Sintaxis "
+                         "incorrecta cerca de '('. (102) (SQLExecDirectW)\")")
+
+    message = server_error(Failure(), Engine())
+    assert "Sintaxis incorrecta cerca de '('" in message and "SQL Server 2016" in message and "[SQL:" not in message
