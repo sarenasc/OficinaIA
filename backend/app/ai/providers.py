@@ -91,7 +91,23 @@ def parse_response(content: str, *, encoded_arguments=False) -> dict:
     return value
 
 
+API_SUFFIXES = ("/messages", "/chat/completions", "/models")
+
+
+def normalize_url(kind: str, url: str) -> str:
+    """Accept https://api.anthropic.com, .../v1/ or .../v1/messages; store the base .../v1."""
+    url = (url or "").strip().rstrip("/")
+    if kind in {"openai", "anthropic"}:
+        for suffix in API_SUFFIXES:
+            if url.endswith(suffix):
+                url = url[: -len(suffix)].rstrip("/")
+        if not urlparse(url).path:
+            url += "/v1"
+    return url
+
+
 def validate_provider(provider: Provider, model: str = ""):
+    provider.url = normalize_url(provider.kind, provider.url)
     parsed = urlparse(provider.url)
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("URL de proveedor inválida")
@@ -108,6 +124,8 @@ def validate_provider(provider: Provider, model: str = ""):
         }
         if parsed.scheme != "https" or parsed.hostname != hosts.get(provider.kind):
             raise ValueError("Proveedor externo requiere su endpoint HTTPS oficial")
+        if provider.kind in {"openai", "anthropic"} and parsed.path != "/v1":
+            raise ValueError(f"{provider.kind} requiere la URL base https://{parsed.hostname}/v1")
         if provider.kind == "gemini" and parsed.path.rstrip("/") not in {"/v1beta", "/v1"}:
             raise ValueError(
                 "Gemini requiere una URL base, por ejemplo https://generativelanguage.googleapis.com/v1beta; no incluya /models ni :generateContent"
@@ -288,7 +306,9 @@ async def discover(provider: Provider):
     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
         result = await client.get(url, headers=headers)
         if result.status_code >= 400:
-            raise ValueError(f"Prueba de proveedor falló: HTTP {result.status_code}")
+            hint = " (revise la URL base del proveedor)" if result.status_code == 404 else ""
+            raise ValueError(f"Prueba de proveedor falló: HTTP {result.status_code}"
+                             + provider_error_detail(result) + hint)
         data = result.json()
     if provider.kind == "ollama":
         return [
