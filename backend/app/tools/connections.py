@@ -128,6 +128,8 @@ def validate_select(query: str, kind: str):
         "CURRENT_SCHEMA",
     }
     for node in tree.find_all(exp.Func):
+        if isinstance(node, exp.Connector):
+            continue  # AND/OR/XOR are logical operators, modeled as Func by sqlglot>=29
         name = node.name.upper() if isinstance(node, exp.Anonymous) else node.sql_name().upper()
         if name not in allowed:
             raise PermissionError(f"Función SQL no autorizada: {name}")

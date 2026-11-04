@@ -109,6 +109,9 @@ def test_sql_rejects_write_and_side_effects(query):
     ("SELECT DB_NAME() AS base", "sqlserver"),
     ("SELECT SCHEMA_NAME() AS esquema", "sqlserver"),
     ("SELECT current_database()", "postgresql"),
+    ("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'VIEW' AND TABLE_SCHEMA = 'dbo' "
+     "OR NOT (TABLE_NAME LIKE 'tmp%' AND TABLE_NAME IN ('a', 'b'))", "sqlserver"),
+    ("SELECT COUNT(*) FROM ventas WHERE kilos > 0 AND fecha BETWEEN '2026-01-01' AND '2026-12-31'", "sqlserver"),
 ])
 def test_sql_allows_active_database_name(query, kind):
     assert validate_select(query, kind) == query
