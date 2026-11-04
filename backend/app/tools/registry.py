@@ -10,7 +10,7 @@ from app.core.audit import audit, redact
 from app.execution.service import execute as execute_backend
 from app.models import Agent, AgentRelation, AgentTool, Artifact, Execution, Task, Tool
 from app.security.permissions import ApprovalRequired, require_approval, resource_path
-from app.tools.connections import describe_connection, execute_write, query_readonly
+from app.tools.connections import QueryRejected, describe_connection, execute_write, query_readonly
 from app.tools.data import generate_sales, prepare_chart, read_csv, save_chart, summarize, write_excel
 from app.tools.files import publish_bytes
 
@@ -202,7 +202,12 @@ def dispatch(session: Session, task: Task, agent: Agent, tool: Tool, args: dict)
         return describe_connection(session, agent, args["connection_id"], args.get("table"), args.get("schema"),
                                    bool(args.get("columns")))
     if kind == "sql.query":
-        return query_readonly(session, agent, args["connection_id"], args["query"], args.get("parameters"), args.get("max_rows", 10000))
+        try:
+            return query_readonly(session, agent, args["connection_id"], args["query"], args.get("parameters"),
+                                  args.get("max_rows", 10000), truncate=True)
+        except QueryRejected as exc:
+            # Refused before reaching the server: let the agent rewrite the query instead of failing the task.
+            raise ToolArgumentsError(f"{exc}. Reescribe la consulta con funciones permitidas y SQL de lectura") from exc
     if kind == "custom.sql":
         return query_readonly(session, agent, tool.config["connection_id"], tool.config["query"])
     if kind == "custom.python":

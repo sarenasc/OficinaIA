@@ -25,6 +25,7 @@ def setup_agent(client, tmp_path):
                     "excel.from_csv",
                     "sql.export_excel",
                     "sql.describe",
+                    "sql.query",
                     "social.prepare_post",
                 }
             ],
@@ -142,12 +143,16 @@ def test_sql_calculations_export_directly_and_deny_writes(client, tmp_path):
     assert '"views": ["resumen"]' in listing["result"] and str(source).replace("\\", "\\\\") in listing["result"]
     view = run_tool(client, office, agent, "sql.describe", {"connection_id": connection["id"], "table": "resumen"})
     assert view["status"] == "completed" and '"kind": "view"' in view["result"], view
+    capped = run_tool(client, office, agent, "sql.query",
+                      {"connection_id": connection["id"], "query": "SELECT * FROM sales", "max_rows": 1})
+    assert capped["status"] == "completed", capped
+    assert '"truncated": true' in capped["result"] and '"count": 1' in capped["result"]
     full = run_tool(client, office, agent, "sql.describe", {"connection_id": connection["id"], "columns": True})
     assert full["status"] == "completed", full
     objects = {item["name"]: item for item in json.loads(full["result"])["objects"]}
     assert objects["sales"]["rows"] == 2 and objects["sales"]["kind"] == "table"
     assert objects["resumen"]["kind"] == "view" and objects["resumen"]["rows"] is None
-    assert [c["name"] for c in objects["resumen"]["columns"]] == ["producto", "total"]
+    assert [c.split()[0] for c in objects["resumen"]["columns"]] == ["producto", "total"]
     args = {
         "connection_id": connection["id"],
         "query": "SELECT producto, SUM(total) AS ventas FROM sales GROUP BY producto",

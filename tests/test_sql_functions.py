@@ -1,7 +1,6 @@
 """Corpus of read-only analytic queries an agent writes; each must pass validate_select."""
 import pytest
-from app.tools.connections import validate_select
-from sqlglot.errors import ParseError
+from app.tools.connections import QueryRejected, validate_select
 
 TSQL = [
     "SELECT CASE WHEN kilos > 0 THEN 'si' ELSE 'no' END AS c FROM t",
@@ -96,5 +95,22 @@ def test_analytic_queries_are_allowed(query, kind):
     ("SELECT load_extension('x')", "sqlite"),
 ])
 def test_dangerous_queries_are_rejected(query, kind):
-    with pytest.raises((PermissionError, ParseError)):
+    with pytest.raises(QueryRejected):
         validate_select(query, kind)
+
+
+def test_tool_results_fit_the_agent_context():
+    from app.agents.engine import compact_history, model_tool_result
+
+    rows = {"rows": [{"tabla": f"t{n}", "columna": f"c{n}", "tipo": "int"} for n in range(500)], "count": 500}
+    small = model_tool_result(rows)
+    assert small["preview_only"] and 0 < len(small["rows_sample"]) < 500 and len(str(small)) < 4000
+    large = model_tool_result(rows, budget=100000)
+    assert large == rows  # a large-context agent sees every row
+    described = {"database": "UNITEC", "objects": [{"name": f"t{n}", "columns": ["fecha DATE"] * 30} for n in range(60)]}
+    fitted = model_tool_result(described, budget=8192)
+    assert 0 < fitted["objects_shown"] < 60 and fitted["database"] == "UNITEC"
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "pedido"}]
+    messages += [{"role": "user", "content": "Resultado herramienta: " + "x" * 5000} for _ in range(6)]
+    total = compact_history(messages, 20000)
+    assert total <= 20000 and len(messages[-1]["content"]) > 5000 and messages[2]["content"].endswith("auditoría]")

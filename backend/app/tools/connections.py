@@ -131,26 +131,35 @@ SAFE_SQL_FUNCTIONS = frozenset({
 })
 
 
+class QueryRejected(PermissionError):
+    """The query text itself was refused before reaching the server; the agent may rewrite it."""
+
+
 def validate_select(query: str, kind: str):
     dialect = {"sqlserver": "tsql", "postgresql": "postgres", "mysql": "mysql", "sqlite": "sqlite"}[kind]
-    statements = sqlglot.parse(query, read=dialect)
+    try:
+        statements = sqlglot.parse(query, read=dialect)
+    except sqlglot.errors.ParseError as exc:
+        raise QueryRejected(f"No se pudo interpretar la consulta SQL: {str(exc).splitlines()[0][:300]}") from None
     if len(statements) != 1 or not isinstance(statements[0], exp.Query):
-        raise PermissionError("Solo una consulta SELECT de lectura está permitida")
+        raise QueryRejected("Solo una consulta SELECT de lectura está permitida")
     tree = statements[0]
     forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Create, exp.Drop, exp.Command, exp.Into, exp.Merge, exp.Copy)
     if any(isinstance(node, forbidden) for node in tree.walk()):
-        raise PermissionError("Consulta contiene operaciones no autorizadas")
+        raise QueryRejected("Consulta contiene operaciones no autorizadas")
     # Functions can execute arbitrary server code; only the read-only allowlist below.
     for node in tree.find_all(exp.Func):
         if isinstance(node, exp.Connector):
             continue  # AND/OR/XOR are logical operators, modeled as Func by sqlglot>=29
         name = node.name.upper() if isinstance(node, exp.Anonymous) else node.sql_name().upper()
         if name not in SAFE_SQL_FUNCTIONS:
-            raise PermissionError(f"Función SQL no autorizada: {name}")
+            raise QueryRejected(f"Función SQL no autorizada: {name}")
     return query
 
 
-def query_readonly(session: Session, agent: Agent, connection_id: str, query: str, parameters=None, max_rows=10000):
+def query_readonly(session: Session, agent: Agent, connection_id: str, query: str, parameters=None, max_rows=10000,
+                   truncate=False):
+    """truncate: return the first max_rows rows with truncated=True (exploration) instead of failing (exports)."""
     connection = session.get(Connection, connection_id)
     assignment = session.get(AgentConnection, (agent.id, connection_id))
     if (
@@ -176,8 +185,10 @@ def query_readonly(session: Session, agent: Agent, connection_id: str, query: st
                     deadline = time.monotonic() + 30
                     db.connection.driver_connection.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
                 records = db.execute(text(query), parameters or {}).mappings().fetchmany(max_rows + 1)
-                if len(records) > max_rows:
+                truncated = len(records) > max_rows
+                if truncated and not truncate:
                     raise ValueError(f"La consulta excede {max_rows} filas; agregue un límite")
+                records = records[:max_rows]
                 rows = [
                     {
                         key: value if isinstance(value, (str, int, float, bool, type(None))) else str(value)
@@ -185,6 +196,10 @@ def query_readonly(session: Session, agent: Agent, connection_id: str, query: st
                     }
                     for row in records
                 ]
+        if truncated:
+            return {"rows": rows, "count": len(rows), "truncated": True,
+                    "notice": f"Hay más de {max_rows} filas; se muestran las primeras {max_rows}. "
+                              "Use filtros, GROUP BY o COUNT(*) si necesita el total"}
         return {"rows": rows, "count": len(rows)}
     finally:
         engine.dispose()
@@ -239,10 +254,13 @@ def execute_write(session, task, agent, args):
 MAX_DESCRIBED_OBJECTS = 60
 
 
-def _columns(metadata, table, schema):
+def _columns(metadata, table, schema, compact=False):
     columns = metadata.get_columns(table, schema=schema)
-    return [{"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in columns[:100]], \
-        len(columns) > 100
+    if compact:  # "fecha DATE", "kilos DECIMAL(18, 2) NULL": several tables fit in the agent context
+        listed = [f"{c['name']} {c['type']}" + (" NULL" if c.get("nullable", True) else "") for c in columns[:100]]
+    else:
+        listed = [{"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in columns[:100]]
+    return listed, len(columns) > 100
 
 
 def _row_counts(engine, kind: str, schema: str | None, default_schema: str | None, names: list[str]) -> dict:
@@ -298,7 +316,7 @@ def describe_connection(
                     for name in items:
                         if len(objects) >= MAX_DESCRIBED_OBJECTS:
                             break
-                        cols, cut = _columns(metadata, name, schema)
+                        cols, cut = _columns(metadata, name, schema, compact=True)
                         objects.append({"name": name, "kind": kind, "rows": counts.get(name), "columns": cols,
                                         "columns_truncated": cut})
                 result["objects"] = objects

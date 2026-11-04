@@ -139,7 +139,41 @@ def save_context(session: Session, task: Task, context: dict):
     session.commit()
 
 
-def model_tool_result(result: dict) -> dict:
+def result_budget(agent) -> int:
+    """Characters one tool result may take in the model context: about a quarter of it (4 chars/token)."""
+    return max(3000, int(getattr(agent, "context_limit", 0) or 0))
+
+
+def _fit(items: list, budget: int) -> list:
+    shown, used = [], 0
+    for item in items:
+        used += len(json.dumps(item, ensure_ascii=False)) + 1
+        if used > budget:
+            break
+        shown.append(item)
+    return shown
+
+
+TOOL_RESULT_PREFIX = "Resultado herramienta: "
+
+
+def compact_history(messages: list[dict], limit: int) -> int:
+    """Shorten the oldest tool results (complete in the audit) before giving up on the context limit.
+
+    The system prompt, the request and the two latest messages are kept intact."""
+    total = sum(len(m["content"]) for m in messages)
+    for message in messages[2:-2]:
+        if total <= limit:
+            break
+        content = message["content"]
+        if message["role"] == "user" and content.startswith(TOOL_RESULT_PREFIX) and len(content) > 800:
+            short = content[:600] + " … [resultado anterior resumido para ahorrar contexto; completo en auditoría]"
+            total -= len(content) - len(short)
+            message["content"] = short
+    return total
+
+
+def model_tool_result(result: dict, budget: int = 3000) -> dict:
     """Keep full results in executions; send bounded previews for tabular reads."""
     references = {key: result[key] for key in ("path", "resource_id", "dataset_ref", "sha256", "verified", "url", "source", "consulted_at", "data_saved") if key in result}
     if "sheets" in result:
@@ -151,11 +185,23 @@ def model_tool_result(result: dict) -> dict:
             compact["sheets"] = {name: {"row_count": value["row_count"],
                                        "columns": value["columns"][:20]} for name, value in list(preview.items())[:5]}
         return {**compact, **references}
-    if "rows" in result and isinstance(result["rows"], list) and len(json.dumps(result, ensure_ascii=False)) > 2000:
-        return {**references, "count": result.get("count", len(result["rows"])), "preview_only": True,
-                "columns": list(result["rows"][0])[:20] if result["rows"] else [],
-                "notice": "Resultado completo en auditoría; use herramientas directas para procesar todas las filas."}
-    if len(json.dumps(result, ensure_ascii=False)) > 3000:
+    if "rows" in result and isinstance(result["rows"], list) and len(json.dumps(result, ensure_ascii=False)) > budget - 1000:
+        compact = {**references, "count": result.get("count", len(result["rows"])), "preview_only": True,
+                   "columns": list(result["rows"][0])[:20] if result["rows"] else [],
+                   "notice": "Resultado completo en auditoría; use herramientas directas para procesar todas las filas."}
+        if not references:
+            # Exploration (metadata, counts, small groupings): show the rows that fit instead of none.
+            compact["rows_sample"] = _fit(result["rows"], budget - 1000)
+            compact["notice"] = (f"Se muestran {len(compact['rows_sample'])} de {compact['count']} filas. "
+                                 "Use filtros, GROUP BY o agregados para ver el resto.")
+        return compact
+    if isinstance(result.get("objects"), list) and len(json.dumps(result, ensure_ascii=False)) > budget:
+        shown = _fit(result["objects"], budget - 1000)
+        return {**{k: v for k, v in result.items() if k != "objects"}, "objects": shown,
+                "objects_shown": len(shown), "preview_only": len(shown) < len(result["objects"]),
+                "notice": "Las tablas y vistas sin detalle aparecen en tables/views; pida sus columnas con "
+                          "sql.describe y table."}
+    if len(json.dumps(result, ensure_ascii=False)) > budget:
         def preview(value, depth=0):
             if isinstance(value, str):
                 return value[:500]
@@ -329,9 +375,14 @@ async def run_agents(session: Session, task: Task):
         if action:
             action = canonical_action(action)
         if not action:
-            total = sum(len(m["content"]) for m in frame["messages"])
-            if total > agent.context_limit * 4:
-                raise ValueError("Contexto excede el límite configurado; divida la tarea")
+            limit = agent.context_limit * 4
+            total = compact_history(frame["messages"], limit)
+            if total > limit:
+                raise ValueError(
+                    f"Contexto excede el límite configurado ({total} de {limit} caracteres, "
+                    f"límite de contexto {agent.context_limit}). Aumente el límite de contexto del agente "
+                    "si su modelo lo admite, o divida la tarea"
+                )
             try:
                 action = await model_action(session, task, agent, frame["messages"])
             except ModelCallError as exc:
@@ -378,10 +429,10 @@ async def run_agents(session: Session, task: Task):
                 continue
             execution = session.scalar(select(Execution).where(Execution.task_id == task.id, Execution.agent_id == agent.id,
                                        Execution.tool_name == action["name"]).order_by(Execution.created_at.desc()).limit(1))
-            preview = model_tool_result(result)
+            preview = model_tool_result(result, result_budget(agent))
             if preview.get("preview_only") and execution:
                 preview = {**preview, "execution_id": execution.id}
-            frame["messages"].append({"role": "user", "content": "Resultado herramienta: " +
+            frame["messages"].append({"role": "user", "content": TOOL_RESULT_PREFIX +
                                       json.dumps(preview, ensure_ascii=False, separators=(",", ":"))})
             frame["repeated_tool"] = frame.get("repeated_tool", 0) + 1 if frame.get("last_tool") == signature else 1
             frame["last_tool"] = signature
