@@ -23,6 +23,8 @@ modelos se requieren para IA local. [Instrucciones y compilación](docs/INICIO_S
 
 [Diagnóstico del timeout del Investigador](docs/DIAGNOSTICO_INVESTIGADOR_TIMEOUT.md): auditoría real, fuentes y permisos, latencia Ollama, previews de datasets y operaciones explícitas sin inferencias innecesarias. El análisis de Colo-Colo sigue pendiente de una fuente con cobertura verificada.
 
+**Programación de tareas:** en el menú Programación, cada agente puede iniciar su tarea o un procedimiento a una hora y en días de la semana mientras la aplicación está abierta. **Informe de actividad:** Resumen → Consumo IA → Descargar Excel, con rango de fechas, agentes trabajando y sin actividad, tareas, tokens y USD. [Qué se puede crear en Procedimientos (Word)](docs/Informe_Procedimientos_Oficina_IA.docx).
+
 [Importar habilidades desde JSON](docs/IMPORTAR_HABILIDADES.md): plantilla y creación de habilidades con instrucciones y herramientas requeridas.
 
 ## Etapa 3: herramientas reales
