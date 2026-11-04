@@ -10,7 +10,9 @@ TOOLS = [
              "value_column": {"type": "string", "minLength": 1, "maxLength": 200}, "output_path": TEXT},
             ["resource_id", "path", "group_column", "value_column"]), ["sports.analyze"]),
     ("agents.list", "Consultar agentes y delegaciones autorizadas de esta oficina", "agents.list", schema({}, []), []),
-    ("tasks.status", "Consultar estado y pasos de una tarea de esta oficina", "tasks.status", schema({"task_id": TEXT}, []), []),
+    ("tasks.status", "Consultar estado, resultado y pasos de una tarea de esta oficina; task_id acepta el número "
+     "visible (TASK-2026-...) para reutilizar resultados anteriores sin repetir consultas", "tasks.status",
+     schema({"task_id": TEXT}, []), []),
     ("web.search", "Buscar con Brave Search configurado y credencial segura", "web.search",
      schema({"query": {"type": "string", "minLength": 1, "maxLength": 1000},
              "max_results": {"type": "integer", "minimum": 1, "maximum": 20},

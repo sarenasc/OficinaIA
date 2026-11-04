@@ -212,3 +212,20 @@ def test_sql_server_side_error_becomes_correctable(client, tmp_path):
         with pytest.raises(ToolArgumentsError, match="no such column"):
             execute_tool(session, task, session.get(Agent, agent["id"]), "sql.query",
                          {"connection_id": connection["id"], "query": "SELECT kilos FROM sales"})
+
+
+def test_tasks_status_reads_a_previous_result_by_number(client, tmp_path):
+    from app.core.db import SessionLocal
+    from app.models import Agent, Task, Tool
+    from app.tools.registry import dispatch
+
+    office, agent, _ = setup_agent(client, tmp_path)
+    with SessionLocal() as session:
+        previous = Task(number="TASK-2026-19551C8A", office_id=office["id"], agent_id=agent["id"], request="Pareto",
+                        status="completed", result='{"pareto": [["Falla", 120]]}')
+        current = Task(number="TASK-2026-B8A99894", office_id=office["id"], agent_id=agent["id"], request="PDF")
+        session.add_all([previous, current])
+        session.commit()
+        result = dispatch(session, current, session.get(Agent, agent["id"]), Tool(name="tasks.status", kind="tasks.status"),
+                          {"task_id": "task-2026-19551c8a"})
+        assert result["number"] == "TASK-2026-19551C8A" and "Falla" in result["result"]

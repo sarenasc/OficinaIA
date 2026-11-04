@@ -38,10 +38,13 @@ def dispatch(session: Session, task: Task, agent: Agent, tool: Tool, args: dict)
                             "delegatable": item.id in allowed and item.status != "disabled"}
                            for item in session.scalars(select(Agent).where(Agent.office_id == agent.office_id))]}
     if kind == "tasks.status":
-        target = session.get(Task, args.get("task_id", task.id))
+        reference = str(args.get("task_id") or task.id).strip()
+        # Accept the visible number (TASK-2026-...) as well as the internal id.
+        target = session.get(Task, reference) or session.scalar(select(Task).where(Task.number == reference.upper()))
         if not target or target.office_id != agent.office_id:
             raise PermissionError("La tarea no pertenece a esta oficina")
         return {"task_id": target.id, "number": target.number, "status": target.status, "error": target.error,
+                "request": target.request, "result": target.result,
                 "executions": [{"tool": e.tool_name, "status": e.status, "error": e.error}
                                for e in session.scalars(select(Execution).where(Execution.task_id == target.id)
                                .order_by(Execution.created_at.desc()).limit(20))]}
