@@ -91,6 +91,7 @@ def parse_response(content: str, *, encoded_arguments=False) -> dict:
     return value
 
 
+ANTHROPIC_MAX_TOKENS = 16000
 API_SUFFIXES = ("/messages", "/chat/completions", "/models")
 
 
@@ -182,7 +183,9 @@ class HTTPProvider(AIProvider):
             elif provider.kind == "anthropic":
                 endpoint = base + "/messages"
                 headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
-                body = {"model": model, "max_tokens": 4096, "system": messages[0]["content"], "messages": messages[1:]}
+                # 16000: room for long final reports; higher values need streaming to stay under HTTP timeouts.
+                body = {"model": model, "max_tokens": ANTHROPIC_MAX_TOKENS, "system": messages[0]["content"],
+                        "messages": messages[1:]}
                 body['output_config'] = {'format': {'type': 'json_schema', 'schema': ANTHROPIC_ACTION_SCHEMA}}
                 body['system'] += ('\nFormato de transporte: devuelve un objeto con type=tool/delegate/final. '
                                    'Para tool usa name y arguments_json (argumentos serializados como cadena JSON), '
@@ -201,7 +204,8 @@ class HTTPProvider(AIProvider):
                 }
             else:
                 raise ValueError("Proveedor pendiente")
-        seconds = 300 if provider.kind == "ollama" else 120
+        # External: a 16000-token answer can take several minutes (same 10-minute default as the official SDK).
+        seconds = 300 if provider.kind == "ollama" else 600
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(seconds, connect=10), follow_redirects=False, trust_env=False
         ) as client:
@@ -252,7 +256,8 @@ class HTTPProvider(AIProvider):
             tin, tout = data.get("usage", {}).get("prompt_tokens", 0), data.get("usage", {}).get("completion_tokens", 0)
         elif provider.kind == "anthropic":
             if data.get('stop_reason') == 'max_tokens':
-                raise ModelCallError('Claude cortó la respuesta por el límite de tokens; reduzca la salida solicitada',
+                raise ModelCallError(f'Claude cortó la respuesta al llegar a {ANTHROPIC_MAX_TOKENS} tokens de salida; '
+                                     'pida un resultado más breve o divídalo en varias tareas',
                                      'model_truncated', attempts)
             if data.get('stop_reason') == 'refusal':
                 raise ModelCallError('Claude rechazó la solicitud; revise la tarea antes de volver a intentarla',

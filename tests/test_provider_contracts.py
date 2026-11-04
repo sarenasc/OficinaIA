@@ -144,3 +144,20 @@ async def test_discover_404_explains_url(monkeypatch):
     monkeypatch.setattr(secrets, "get", lambda ref: "test-key")
     with pytest.raises(ValueError, match="not_found_error.*URL base"):
         await discover(Provider(kind="anthropic", url="https://api.anthropic.com"))
+
+
+async def test_anthropic_requests_room_for_long_reports(monkeypatch):
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={'stop_reason': 'end_turn', 'content': [
+            {'type': 'text', 'text': json.dumps({'type': 'final', 'content': 'ok'})}]})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(secrets, 'get', lambda ref: 'fixture-key')
+    await HTTPProvider().complete(Provider(kind='anthropic', url='https://api.anthropic.com/v1'),
+                                  Agent(temperature=0.2, context_limit=8192), 'claude-sonnet-5-5',
+                                  [{'role': 'system', 'content': 'JSON'}, {'role': 'user', 'content': 'Hola'}])
+    assert bodies[0]['max_tokens'] == 16000
