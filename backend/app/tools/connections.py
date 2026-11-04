@@ -122,6 +122,10 @@ def validate_select(query: str, kind: str):
         "MONTH",
         "DAY",
         "DATE_TRUNC",
+        # Name of the active database/schema: read-only metadata.
+        "DB_NAME",
+        "CURRENT_DATABASE",
+        "CURRENT_SCHEMA",
     }
     for node in tree.find_all(exp.Func):
         name = node.name.upper() if isinstance(node, exp.Anonymous) else node.sql_name().upper()
@@ -232,13 +236,18 @@ def describe_connection(
     try:
         metadata = inspect(engine)
         names = metadata.get_table_names(schema=schema)
+        views = metadata.get_view_names(schema=schema)
+        database = connection.config.get("database") or connection.config.get("path")
         if table is None:
-            return {"tables": names[:100], "truncated": len(names) > 100, "schema": schema}
-        if table not in names:
-            raise ValueError("La tabla no existe en el esquema solicitado")
+            return {"database": database, "schema": schema, "tables": names[:100], "views": views[:100],
+                    "truncated": len(names) > 100 or len(views) > 100}
+        if table not in names and table not in views:
+            raise ValueError("La tabla o vista no existe en el esquema solicitado")
         columns = metadata.get_columns(table, schema=schema)
         return {
+            "database": database,
             "table": table,
+            "kind": "view" if table in views else "table",
             "schema": schema,
             "columns": [
                 {"name": c["name"], "type": str(c["type"]), "nullable": c.get("nullable", True)} for c in columns[:100]

@@ -105,6 +105,15 @@ def test_sql_rejects_write_and_side_effects(query):
         validate_select(query, "postgresql")
 
 
+@pytest.mark.parametrize("query,kind", [
+    ("SELECT DB_NAME() AS base", "sqlserver"),
+    ("SELECT SCHEMA_NAME() AS esquema", "sqlserver"),
+    ("SELECT current_database()", "postgresql"),
+])
+def test_sql_allows_active_database_name(query, kind):
+    assert validate_select(query, kind) == query
+
+
 def test_sql_readonly_to_excel(client, tmp_path):
     source = tmp_path / "source.db"
     with sqlite3.connect(source) as db:
